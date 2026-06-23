@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd studio && npm install --no-audit --no-fund && npm run build",
+  "outputDirectory": "studio/dist",
+  "installCommand": "echo skip-root-install",
+  "framework": null,
+  "rewrites": [
+    { "source": "/healthz", "destination": "http://204.168.143.213:8090/healthz" },
+    { "source": "/health", "destination": "http://204.168.143.213:8090/health" },
+    { "source": "/registry", "destination": "http://204.168.143.213:8090/registry" },
+    { "source": "/message", "destination": "http://204.168.143.213:8090/message" },
+    { "source": "/projects", "destination": "http://204.168.143.213:8090/projects" },
+    { "source": "/auth/:path*", "destination": "http://204.168.143.213:8090/auth/:path*" },
+    { "source": "/history/:path*", "destination": "http://204.168.143.213:8090/history/:path*" },
+    { "source": "/architecture/:path*", "destination": "http://204.168.143.213:8090/architecture/:path*" },
+    { "source": "/preview/:path*", "destination": "http://204.168.143.213:8090/preview/:path*" },
+    { "source": "/memory/:path*", "destination": "http://204.168.143.213:8090/memory/:path*" }
+  ]
+}
