@@ -1,0 +1,65 @@
+-- seed.real.example.sql — TEMPLATE for overlaying REAL prod rows on the local
+-- baseline so you can test isolation against real identities/projects.
+--
+-- WHY a template (not committed real data): real rows carry user PII (emails)
+-- and we never commit prod data into the repo. Copy this to seed.real.sql
+-- (gitignored), fill it from prod, and apply AFTER `supabase db reset`:
+--     psql "$LOCAL_DB_URL" -f supabase/seed.real.sql
+--
+-- IMPORTANT — auth caveat: a real prod JWT will NOT validate against the local
+-- GoTrue (different signing secret). So we recreate the real user LOCALLY with
+-- their real UUID + email and a known dev password. You log in locally with
+-- that email/password → local JWT → auth.uid() = the real UUID → RLS resolves
+-- against the real membership rows you copied. Real identity, local auth.
+--
+-- ── Step 1: extract the rows from prod ───────────────────────────────────
+-- Run these against the PROD DB (read-only). Each emits ready-to-paste VALUES.
+-- (Replace :uid / :pid with the real user/project UUID you want to mirror.)
+--
+--   -- the user:
+--   SELECT format('(%L,%L,%L)', id, email, raw_user_meta_data->>'display_name')
+--   FROM auth.users WHERE id = :'uid';
+--
+--   -- the project's workspace + org:
+--   SELECT a.id AS project_id, a.workspace_id, w.organization_id, a.user_id, a.name
+--   FROM user_mini_apps a JOIN workspaces w ON w.id = a.workspace_id
+--   WHERE a.id = :'pid';
+--
+--   -- the membership rows that gate access:
+--   SELECT workspace_id, user_id, role FROM workspace_members WHERE user_id = :'uid';
+--   SELECT org_id, workspace_run_visibility FROM org_settings
+--   WHERE org_id = (SELECT organization_id FROM workspaces WHERE id = :wsid);
+--
+-- ── Step 2: paste the values below ───────────────────────────────────────
+
+-- Real user, recreated locally (real UUID, real email, DEV password):
+-- INSERT INTO auth.users (instance_id, id, aud, role, email, encrypted_password,
+--   email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
+-- VALUES ('00000000-0000-0000-0000-000000000000', '<REAL_USER_UUID>',
+--   'authenticated','authenticated','<REAL_EMAIL>', crypt('password', gen_salt('bf')),
+--   now(), now(), now(), '{"provider":"email","providers":["email"]}',
+--   '{"display_name":"<REAL_NAME>"}')
+-- ON CONFLICT (id) DO NOTHING;
+--
+-- INSERT INTO auth.identities (provider_id, user_id, identity_data, provider, created_at, updated_at)
+-- VALUES ('<REAL_USER_UUID>','<REAL_USER_UUID>',
+--   '{"sub":"<REAL_USER_UUID>","email":"<REAL_EMAIL>"}','email', now(), now())
+-- ON CONFLICT (provider, provider_id) DO NOTHING;
+--
+-- INSERT INTO public.profiles (id, email, display_name)
+-- VALUES ('<REAL_USER_UUID>','<REAL_EMAIL>','<REAL_NAME>') ON CONFLICT (id) DO NOTHING;
+
+-- Real org / workspace / project / membership (real UUIDs):
+-- INSERT INTO public.organizations (id, name, created_by)
+--   VALUES ('<REAL_ORG_UUID>','<REAL_ORG_NAME>','<REAL_USER_UUID>') ON CONFLICT (id) DO NOTHING;
+-- INSERT INTO public.org_settings (org_id, workspace_run_visibility)
+--   VALUES ('<REAL_ORG_UUID>', <REAL_VISIBILITY_BOOL>) ON CONFLICT (org_id) DO NOTHING;
+-- INSERT INTO public.workspaces (id, name, organization_id, created_by)
+--   VALUES ('<REAL_WS_UUID>','<REAL_WS_NAME>','<REAL_ORG_UUID>','<REAL_USER_UUID>') ON CONFLICT (id) DO NOTHING;
+-- INSERT INTO public.workspace_members (workspace_id, user_id, role)
+--   VALUES ('<REAL_WS_UUID>','<REAL_USER_UUID>','<REAL_ROLE>') ON CONFLICT DO NOTHING;
+-- INSERT INTO public.user_mini_apps (id, workspace_id, user_id, name)
+--   VALUES ('<REAL_PROJECT_UUID>','<REAL_WS_UUID>','<REAL_USER_UUID>','<REAL_APP_NAME>') ON CONFLICT (id) DO NOTHING;
+-- INSERT INTO public.project_chats (id, project_id, workspace_id, title, created_by, kind)
+--   VALUES (gen_random_uuid(),'<REAL_PROJECT_UUID>','<REAL_WS_UUID>','Main','<REAL_USER_UUID>','main')
+--   ON CONFLICT (id) DO NOTHING;

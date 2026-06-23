@@ -1,0 +1,488 @@
+{
+  "generatedAt": "2026-06-22T23:34:48.801Z",
+  "sourceReport": "/Users/dav/Desktop/projects/vbp-german/docs/modular-agentic-system/builds/01-custom-ts-kernel/docs-evidence/manual-web-eval-report.json",
+  "sourceEvents": "/Users/dav/Desktop/projects/vbp-german/docs/modular-agentic-system/builds/01-custom-ts-kernel/docs-evidence/manual-web-eval-events.jsonl",
+  "serverUrlForHistoryLinks": "http://localhost:3010",
+  "totals": {
+    "attempted": 10,
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0
+  },
+  "cells": [
+    {
+      "pair": "sdk x docker",
+      "status": "PASS",
+      "runId": "e4c3f9b4-2705-4777-8f63-91ad68309747",
+      "sessionId": "eval-sdk-docker-1782170760534",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/e4c3f9b4-2705-4777-8f63-91ad68309747",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "http://localhost:62549/",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 45372,
+      "inputTokens": 4467,
+      "outputTokens": 589,
+      "cost": 0.022236,
+      "eventRow": 1,
+      "eventCount": 42,
+      "envEvidence": [
+        "provisioning env (docker node:20-slim)",
+        "container created 288c5c6e2df1",
+        "container started",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (33.5s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 exposed → http://localhost:62549/"
+      ],
+      "harnessEvidence": [],
+      "kernelEvidence": [
+        "run started · harness=sdk · environment=docker",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=4467 out=589 · cost=$0.022236"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "I have built a Vite React app named \"Matrix Cell Proof\" that displays the text \"matrix-cell-proof\" on the page. The development server is now running and you can view the live preview of the app at [this link](http://loc..."
+    },
+    {
+      "pair": "sdk x e2b",
+      "status": "PASS",
+      "runId": "4225f6d0-139a-4f0d-a22c-1819ce3cb981",
+      "sessionId": "eval-sdk-e2b-1782170805907",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/4225f6d0-139a-4f0d-a22c-1819ce3cb981",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://5173-iz0c0l4e26ihhapq9cd4n.e2b.app",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 26849,
+      "inputTokens": 4483,
+      "outputTokens": 597,
+      "cost": 0.022404,
+      "eventRow": 2,
+      "eventCount": 42,
+      "envEvidence": [
+        "provisioning env (e2b base)",
+        "sandbox created iz0c0l4e26ihhapq9cd4n",
+        "exec: mkdir -p /home/user/workspace",
+        "exec exit 0 (0.4s): mkdir -p /home/user/workspace",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (6.4s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173"
+      ],
+      "harnessEvidence": [],
+      "kernelEvidence": [
+        "run started · harness=sdk · environment=e2b",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=4483 out=597 · cost=$0.022404"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite React app named \"Matrix Cell Proof\" has been successfully created. The app displays the text \"matrix-cell-proof\" on the webpage. The development server is running, and you can view the live app at [this link](ht..."
+    },
+    {
+      "pair": "sdk x daytona",
+      "status": "PASS",
+      "runId": "7daccc4e-a6d3-4b27-b54f-be080a1e7cf7",
+      "sessionId": "eval-sdk-daytona-1782170832756",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/7daccc4e-a6d3-4b27-b54f-be080a1e7cf7",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://5173-bicedjohcfkdtaff.daytonaproxy01.net",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 36207,
+      "inputTokens": 4744,
+      "outputTokens": 683,
+      "cost": 0.024477,
+      "eventRow": 3,
+      "eventCount": 40,
+      "envEvidence": [
+        "provisioning env (daytona cloud sandbox)",
+        "sandbox created 25ec28ad-9f3a-46bc-ae0c-1946cb91ed07",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (9.3s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 exposed → https://5173-bicedjohcfkdtaff.daytonaproxy01.net"
+      ],
+      "harnessEvidence": [],
+      "kernelEvidence": [
+        "run started · harness=sdk · environment=daytona",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=4744 out=683 · cost=$0.024477"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "I've created a tiny Vite React app named \"Matrix Cell Proof\" that displays the text \"matrix-cell-proof\" on the page. The development server is now running, and you can preview the app using [this link](https://5173-biced..."
+    },
+    {
+      "pair": "sdk x codesandbox",
+      "status": "PASS",
+      "runId": "cbe4745e-522a-4cd4-8407-3f310434d85b",
+      "sessionId": "eval-sdk-codesandbox-1782170868963",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/cbe4745e-522a-4cd4-8407-3f310434d85b",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://cgdp7j-5173.csb.app?preview_token=[redacted]",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 32237,
+      "inputTokens": 9781,
+      "outputTokens": 757,
+      "cost": 0.040698,
+      "eventRow": 4,
+      "eventCount": 40,
+      "envEvidence": [
+        "provisioning env (codesandbox sandbox)",
+        "sandbox created cgdp7j",
+        "connected to sandbox agent",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (11.0s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 is open"
+      ],
+      "harnessEvidence": [],
+      "kernelEvidence": [
+        "run started · harness=sdk · environment=codesandbox",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=9781 out=757 · cost=$0.040698"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite + React app named \"Matrix Cell Proof\" is now running, displaying the text \"matrix-cell-proof\" on the page. You can view the live app at the following URL: [Preview your app](https://cgdp7j-5173.csb.app?preview_t..."
+    },
+    {
+      "pair": "openai-agents x docker",
+      "status": "PASS",
+      "runId": "e2d32068-7d21-4c1e-89b7-f0a544983a98",
+      "sessionId": "eval-openai-agents-docker-1782170901200",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/e2d32068-7d21-4c1e-89b7-f0a544983a98",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "http://localhost:62614/",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 38684,
+      "inputTokens": 5723,
+      "outputTokens": 571,
+      "cost": 0.025734,
+      "eventRow": 5,
+      "eventCount": 98,
+      "envEvidence": [
+        "provisioning env (docker node:20-slim)",
+        "container created 691e5f330cc7",
+        "container started",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (28.0s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 exposed → http://localhost:62614/"
+      ],
+      "harnessEvidence": [
+        "openai-agents: SDK path model=openai/gpt-4o-mini mode=gateway base=https://openrouter.ai/api/v1"
+      ],
+      "kernelEvidence": [
+        "run started · harness=openai-agents · environment=docker",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=5723 out=571 · cost=$0.025734"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite React app named \"Matrix Cell Proof\" has been successfully created. It displays the text \"matrix-cell-proof\" on the page. The development server is running and can be accessed via the following link: [Preview the..."
+    },
+    {
+      "pair": "openai-agents x e2b",
+      "status": "PASS",
+      "runId": "1ac09aa1-fa16-4d5b-a952-3c89cb43459a",
+      "sessionId": "eval-openai-agents-e2b-1782170939885",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/1ac09aa1-fa16-4d5b-a952-3c89cb43459a",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://5173-ip2sahvcw3r0urk6q7s9a.e2b.app",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 24232,
+      "inputTokens": 4489,
+      "outputTokens": 595,
+      "cost": 0.022392,
+      "eventRow": 6,
+      "eventCount": 119,
+      "envEvidence": [
+        "provisioning env (e2b base)",
+        "sandbox created ip2sahvcw3r0urk6q7s9a",
+        "exec: mkdir -p /home/user/workspace",
+        "exec exit 0 (0.2s): mkdir -p /home/user/workspace",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (6.7s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173"
+      ],
+      "harnessEvidence": [
+        "openai-agents: SDK path model=openai/gpt-4o-mini mode=gateway base=https://openrouter.ai/api/v1"
+      ],
+      "kernelEvidence": [
+        "run started · harness=openai-agents · environment=e2b",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=4489 out=595 · cost=$0.022392"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite React app named \"Matrix Cell Proof\" has been successfully created and is now running. It displays the text \"matrix-cell-proof\" on the page. You can view the live preview of the app at the following link: [Previe..."
+    },
+    {
+      "pair": "openai-agents x daytona",
+      "status": "PASS",
+      "runId": "f87f63a4-b094-4d8f-be57-681e637bea72",
+      "sessionId": "eval-openai-agents-daytona-1782170964117",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/f87f63a4-b094-4d8f-be57-681e637bea72",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://5173-moqrmfopr6o82b2m.daytonaproxy01.net",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 26675,
+      "inputTokens": 5900,
+      "outputTokens": 623,
+      "cost": 0.027045,
+      "eventRow": 7,
+      "eventCount": 109,
+      "envEvidence": [
+        "provisioning env (daytona cloud sandbox)",
+        "sandbox created a6a55753-00ca-4f74-a673-2c42986a9949",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (9.9s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 exposed → https://5173-moqrmfopr6o82b2m.daytonaproxy01.net"
+      ],
+      "harnessEvidence": [
+        "openai-agents: SDK path model=openai/gpt-4o-mini mode=gateway base=https://openrouter.ai/api/v1"
+      ],
+      "kernelEvidence": [
+        "run started · harness=openai-agents · environment=daytona",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=5900 out=623 · cost=$0.027045"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite React app named \"Matrix Cell Proof\" has been successfully created. It displays the text \"matrix-cell-proof\" on the page. The development server is running, and you can view the app live at [this link](https://51..."
+    },
+    {
+      "pair": "openai-agents x codesandbox",
+      "status": "PASS",
+      "runId": "d1bcbb50-9be6-4622-84fe-39bf9845d811",
+      "sessionId": "eval-openai-agents-codesandbox-1782170990793",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/d1bcbb50-9be6-4622-84fe-39bf9845d811",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "https://gzcyff-5173.csb.app?preview_token=[redacted]",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 31487,
+      "inputTokens": 9479,
+      "outputTokens": 634,
+      "cost": 0.037947,
+      "eventRow": 8,
+      "eventCount": 136,
+      "envEvidence": [
+        "provisioning env (codesandbox sandbox)",
+        "sandbox created gzcyff",
+        "connected to sandbox agent",
+        "workspace materialized",
+        "exec: npm install",
+        "exec exit 0 (11.0s): npm install",
+        "dev server starting (background): npm run dev -- --host 0.0.0.0 --port 5173",
+        "port 5173 is open"
+      ],
+      "harnessEvidence": [
+        "openai-agents: SDK path model=openai/gpt-4o-mini mode=gateway base=https://openrouter.ai/api/v1"
+      ],
+      "kernelEvidence": [
+        "run started · harness=openai-agents · environment=codesandbox",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=9479 out=634 · cost=$0.037947"
+      ],
+      "toolCalls": [
+        "write_file x5",
+        "run_command x2",
+        "expose_port x1"
+      ],
+      "finalText": "The Vite React app named \"Matrix Cell Proof\" has been successfully created and is now running. You can view the live app, which displays the exact text \"matrix-cell-proof,\" at the following URL: [Preview the app](https:/..."
+    },
+    {
+      "pair": "claude-cli x local",
+      "status": "PASS",
+      "runId": "5a17f3f5-da20-42fd-a167-81381057f881",
+      "sessionId": "eval-claude-cli-local-1782171022405",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/5a17f3f5-da20-42fd-a167-81381057f881",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": true,
+      "previewUrl": "http://localhost:5173/",
+      "previewStatus": 200,
+      "previewLooksLikeApp": true,
+      "durationMs": 43176,
+      "inputTokens": 11583,
+      "outputTokens": 1402,
+      "cost": 0.055779,
+      "eventRow": 9,
+      "eventCount": 37,
+      "envEvidence": [
+        "provisioning env (local /var/folders/hs/t3pr3v_d04j2bchnvc41lql00000gn/T/modular-local-7x2n6T)",
+        "workspace materialized",
+        "exec: npm install --cache .npm-cache --no-audit --no-fund",
+        "exec exit 0 (22.1s): npm install --cache .npm-cache --no-audit --no-fund",
+        "dev server starting (background): npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
+        "port 5173 exposed → http://localhost:5173/"
+      ],
+      "harnessEvidence": [
+        "app files generated — installing dependencies"
+      ],
+      "kernelEvidence": [
+        "run started · harness=claude-cli · environment=local",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=11583 out=1402 · cost=$0.055779"
+      ],
+      "toolCalls": [
+        "Write x5",
+        "run_command x2"
+      ],
+      "finalText": "Live preview ready at http://localhost:5173/"
+    },
+    {
+      "pair": "opencode x local",
+      "status": "PASS",
+      "runId": "9eb05ca5-ecc4-4e48-9092-86bba5757658",
+      "sessionId": "eval-opencode-local-1782171066577",
+      "terminalCause": "done",
+      "historyUrl": "http://localhost:3010/history/9eb05ca5-ecc4-4e48-9092-86bba5757658",
+      "historyListed": true,
+      "historyDetailOk": true,
+      "previewExpected": false,
+      "durationMs": 65585,
+      "inputTokens": 15240,
+      "outputTokens": 443,
+      "cost": 0.052365,
+      "eventRow": 10,
+      "eventCount": 237,
+      "envEvidence": [
+        "provisioning env (local /var/folders/hs/t3pr3v_d04j2bchnvc41lql00000gn/T/modular-local-sEZ3rI)",
+        "workspace materialized",
+        "dev server starting (background): mkdir -p .opencode-home .config .local/share .cache .local/state .runtime && export HOME=\"$PWD/.opencode-home\" XDG_CONFIG_HOME=\"$PWD/.config\" XDG_DATA_HOME=\"$PWD/.local/share\" XDG_CACHE_HOME=\"$PWD/.cache\" XDG_STATE_HOME=\"$PWD/.local/state\" XDG_RUNTIME_DIR=\"$PWD/.runtime\" ; opencode db path >/dev/null 2>&1 && opencode serve --pure --port 4537 --hostname 0.0.0.0",
+        "port 4537 exposed → http://localhost:4537/"
+      ],
+      "harnessEvidence": [
+        "[opencode] server reachable at http://localhost:4537/; creating session",
+        "[opencode] session ses_10e5395e6ffeH19VEnf0346iQb; prompting (model openrouter/openai/gpt-4o-mini)"
+      ],
+      "kernelEvidence": [
+        "run started · harness=opencode · environment=local",
+        "workspace ready · invoking harness",
+        "run settled · cause=done · tokens in=15240 out=443 · cost=$0.052365"
+      ],
+      "toolCalls": [
+        "bash x178"
+      ],
+      "finalText": null
+    }
+  ],
+  "excluded": [
+    {
+      "harness": "codex-cli",
+      "environment": "local",
+      "placement": "agent-inside-sandbox",
+      "ready": false,
+      "prereqs": [
+        "bin:codex",
+        "file:~/.codex/auth.json"
+      ],
+      "expectPreview": true,
+      "reason": "current Codex CLI exits before generation with in-process app-server Operation not permitted; not ready in this local managed session."
+    },
+    {
+      "harness": "opencode",
+      "environment": "non-local",
+      "placement": "agent-inside-sandbox",
+      "ready": false,
+      "prereqs": [],
+      "expectPreview": false,
+      "reason": "mode-2 live-agent-in-sandbox path is verified only for local; remote sandbox packaging is not ready out of the box."
+    },
+    {
+      "harness": "hermes",
+      "environment": "local",
+      "placement": "agent-inside-sandbox",
+      "ready": false,
+      "prereqs": [
+        "bin:hermes",
+        "OPENROUTER_API_KEY"
+      ],
+      "expectPreview": false,
+      "reason": "current Hermes gateway command starts messaging/cron path and never opens the expected HTTP /v1/runs API port."
+    },
+    {
+      "harness": "claude-sdk",
+      "environment": "*",
+      "placement": "control-plane-tools",
+      "ready": false,
+      "prereqs": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "expectPreview": true,
+      "reason": "not part of the current OpenRouter-ready set; requires Anthropic credential path."
+    },
+    {
+      "harness": "pi",
+      "environment": "*",
+      "placement": "hybrid",
+      "ready": false,
+      "prereqs": [],
+      "expectPreview": false,
+      "reason": "implemented as control-plane SDK plus file sync, not a ready live-agent-in-sandbox pair."
+    }
+  ]
+}

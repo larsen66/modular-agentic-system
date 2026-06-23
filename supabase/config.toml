@@ -1,0 +1,43 @@
+# Local Supabase config for the custom-ts-kernel reference build.
+# Brings up Postgres + GoTrue (auth) + PostgREST so the per-user isolation
+# model is exercised against the SAME mechanism prod uses: Supabase RLS.
+#
+# `supabase start` reads this. The default local anon/service keys are the
+# well-known Supabase demo keys (printed by `supabase start`); wire them into
+# the runner via .env (see ISOLATION.md).
+
+project_id = "kernel-iso"
+
+# NOTE: ports are shifted to the 553xx range so this stack can run ALONGSIDE
+# another local Supabase (the default 543xx range may already be taken).
+[api]
+enabled = true
+port = 55321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 55322
+shadow_port = 55320
+major_version = 15
+
+[studio]
+enabled = true
+port = 55323
+
+[inbucket]
+enabled = true
+port = 55324
+
+[auth]
+enabled = true
+# Local-only: allow programmatic signups so seed.sql can mint the dev user.
+site_url = "http://localhost:8080"
+enable_signup = true
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[realtime]
+enabled = true

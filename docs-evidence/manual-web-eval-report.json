@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-06-23T11:44:21.891Z",
+  "serverUrl": "http://127.0.0.1:52452",
+  "manualMode": false,
+  "matrix": [
+    {
+      "harness": "codex-cli",
+      "environment": "local",
+      "placement": "agent-inside-sandbox",
+      "ready": true,
+      "prereqs": [
+        "bin:codex",
+        "file:~/.codex/auth.json"
+      ],
+      "expectPreview": true
+    }
+  ],
+  "excluded": [
+    {
+      "harness": "opencode",
+      "environment": "non-local",
+      "placement": "agent-inside-sandbox",
+      "ready": false,
+      "prereqs": [],
+      "expectPreview": false,
+      "reason": "mode-2 live-agent-in-sandbox path is verified only for local; remote sandbox packaging is not ready out of the box."
+    },
+    {
+      "harness": "claude-agent-sdk",
+      "environment": "*",
+      "placement": "control-plane-tools",
+      "ready": false,
+      "prereqs": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "expectPreview": true,
+      "reason": "not part of the current OpenRouter-ready set; requires Anthropic credential path."
+    },
+    {
+      "harness": "pi",
+      "environment": "*",
+      "placement": "hybrid",
+      "ready": false,
+      "prereqs": [
+        "OPENROUTER_API_KEY"
+      ],
+      "expectPreview": false,
+      "reason": "control-plane agent: blocks on its own `npm run dev` and never calls env.exposePort, so the preview prompt cannot settle. Real generation is proven by src/harnesses/pi/verify.ts (live PASS)."
+    }
+  ],
+  "totals": {
+    "attempted": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "harness": "codex-cli",
+      "environment": "local",
+      "placement": "agent-inside-sandbox",
+      "status": "FAIL",
+      "sessionId": "eval-codex-cli-local-1782215061608",
+      "previewExpected": true,
+      "startedAt": "2026-06-23T11:44:21.507Z",
+      "eventCounts": {
+        "log": 10,
+        "run_started": 1,
+        "terminal": 1,
+        "settled": 1
+      },
+      "runId": "ce179927-7619-4e53-8cf8-a8fef85cb9ed",
+      "historyUrl": "http://127.0.0.1:52452/history/ce179927-7619-4e53-8cf8-a8fef85cb9ed",
+      "settledCause": "error",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cost": 0,
+      "historyListed": true,
+      "historyDetailOk": false,
+      "reason": "settled=error preview=none looksLikeApp=false historyListed=true historyDetail=false",
+      "endedAt": "2026-06-23T11:44:21.890Z",
+      "durationMs": 383
+    }
+  ]
+}

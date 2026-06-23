@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install (kernel)
+        run: npm ci || npm install
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Grep acceptance gate (no substrate words in kernel/registry/types)
+        run: npm run grep-gate
+      - name: Unit + integration tests (Docker tests self-skip without a daemon)
+        run: npm test
+      - name: Install (studio)
+        working-directory: studio
+        run: npm ci || npm install
+      - name: Build Studio (Carbon light-theme UI)
+        working-directory: studio
+        run: npm run build

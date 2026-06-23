@@ -1,0 +1,21 @@
+# Secrets / local env — never commit (public repo)
+.env
+.env.*
+!.env.example
+.harness.env
+.omx/
+
+node_modules/
+dist/
+studio/dist/
+studio/node_modules/
+.playwright-cli/
+*.log
+.e2e-preview-url
+.history/
+.DS_Store
+
+# Local Supabase real-data overlay (real UUIDs/emails — never commit)
+supabase/seed.real.sql
+supabase/.temp/
+supabase/.branches/

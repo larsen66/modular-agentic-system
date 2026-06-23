@@ -1,0 +1,21 @@
+{
+  // The two-seam selection. Swapping the runner is a ref-string change here —
+  // no Core surgery, no harness/env code edits.
+  //
+  // SHIPPED REAL PATH:
+  //   harness:     "sdk"     real mode-1 agent loop; real LLM (ANTHROPIC_API_KEY → Claude,
+  //                          else OPENAI_API_KEY → GPT); routes tools to the handle
+  //   environment: "docker"  real container; real exec/file-sync; real reverse-proxy preview
+  //
+  // TEST RUNG ONLY (CI fixtures, never the product):
+  //   harness:     "dummy" | "dummy-echo"   scripted, no LLM
+  //   environment: "dummy"                   in-memory, no container
+  //
+  // Proven swaps (ref-string only): sdk<->dummy (harness), docker<->dummy (env).
+  "harness": "sdk",
+  "environment": "docker",
+
+  // Used by the docker env. runtimeProfile defaults to node:20-slim; the adapter
+  // publishes common dev ports (5173/3000/8080/...) automatically, so `ports` is optional.
+  "runtimeProfile": "node:20-slim"
+}
