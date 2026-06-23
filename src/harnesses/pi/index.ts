@@ -302,20 +302,28 @@ class PiHarness implements Harness {
 
       // agent-as-tool: env-routed coding tools REPLACE the built-ins (same 4
       // names). agent-in-sandbox: built-ins run locally — no env-routed defs.
-      // The delegate tool (when active) is appended in BOTH topologies.
       const envTools = agentAsTool
         ? buildEnvRoutedToolDefinitions(toolDefFactories, env, tmpDir)
         : [];
       const customTools = [...envTools, ...(delegateTool ? [delegateTool] : [])];
-      // Pass an allowlist only when we must constrain the tool set: in
-      // agent-as-tool (pin the 4 env-routed coding tools) or when delegate is
-      // active. The 4 coding names stay in the list in BOTH topologies — in
-      // agent-as-tool they resolve to the env-routed customTools, in
-      // agent-in-sandbox to the real built-ins (which must stay enabled).
-      const constrainTools = agentAsTool || Boolean(delegateTool);
-      const toolAllowlist = constrainTools
-        ? ['bash', 'read', 'write', 'edit', ...(delegateTool ? ['delegate'] : [])]
-        : undefined;
+
+      // ── Tool allowlist = the STRUCTURAL delegation boundary ────────────────
+      // Router mode (PI is the main agent, can still delegate): PI gets NO
+      // execution surface — only `read` (inspection) + `delegate`. Anything with
+      // side effects (write/edit/run/install/build) is PHYSICALLY only reachable
+      // through delegate, so the "delegate vs do-it-myself" policy is enforced by
+      // the toolset, not by a promptable instruction the model can ignore.
+      //
+      // Leaf mode (depth cap reached, can no longer delegate): PI becomes a
+      // WORKER with the full coding surface — it must do the work itself.
+      let toolAllowlist: string[] | undefined;
+      if (canDelegate) {
+        toolAllowlist = ['read', 'delegate']; // orchestrator: inspect + dispatch only
+      } else if (agentAsTool) {
+        toolAllowlist = ['bash', 'read', 'write', 'edit']; // worker: full env-routed surface
+      } else {
+        toolAllowlist = undefined; // agent-in-sandbox leaf: default built-ins
+      }
 
       // ── Create AgentSession in the temp workspace ─────────────────────────
       log('info', 'creating PI agent session');
@@ -428,15 +436,20 @@ class PiHarness implements Harness {
 
       try {
         // ── Fire the prompt — PI drives the full agent+tool loop ──────────
-        // When routing is active, prepend a short preamble teaching PI that it is
-        // the MAIN agent: read the user's intent, then either answer directly or
-        // `delegate` to the right harness/env. The full catalog lives in the
-        // delegate tool's description (renderCatalog) — kept there so it can never
-        // drift from what actually runs.
+        // When routing is active, prepend the orchestration policy. The boundary
+        // is already enforced structurally (router PI has only read + delegate),
+        // so this just tells PI HOW to decide — not a rule it could bypass. The
+        // full harness/env catalog lives in the delegate tool description.
         const promptText = canDelegate
-          ? `You are the MAIN orchestrating agent. Read the user's request, decide whether it ` +
-            `needs a specialized sub-agent, and if so call the \`delegate\` tool with the right ` +
-            `harness + environment for the task. Handle simple requests yourself.\n\n` +
+          ? `You are the MAIN orchestrating agent. Decide between two actions:\n\n` +
+            `• ANSWER DIRECTLY — for pure reasoning with NO side effects: facts, math, ` +
+            `explanations, plans, analysis. Just reply.\n` +
+            `• DELEGATE — for ANYTHING with side effects: writing files, running or ` +
+            `generating code, installing packages, building/scaffolding apps, executing ` +
+            `untrusted code. Call \`delegate\` with the harness + environment that fit ` +
+            `(use an isolated sandbox env for code execution). You do NOT have write/run ` +
+            `tools yourself — execution happens only through delegate.\n\n` +
+            `Use \`read\` only to inspect before deciding. Then answer or delegate.\n\n` +
             `User request:\n${task.prompt}`
           : task.prompt;
         log('info', `prompting PI (model: ${resolvedModel ? `${resolvedModel.provider}/${resolvedModel.id}` : 'auto'})`);

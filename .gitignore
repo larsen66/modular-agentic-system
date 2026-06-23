@@ -19,3 +19,6 @@ studio/node_modules/
 supabase/seed.real.sql
 supabase/.temp/
 supabase/.branches/
+
+# local debug scratch
+scratch-dbg.ts

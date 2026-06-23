@@ -150,14 +150,15 @@ const dummyEnv = {
 
 // ─── One run = one prompt through PI's real loop with a recording delegate ───
 interface Trace {
-  thinking: string; // concatenated assistant text
+  thinking: string; // concatenated streamed assistant text
+  finalText: string; // the agent_end final_text (some answers arrive only here)
   toolCalls: { name: string; args: unknown }[];
   delegateCalls: DelegateRequest[];
   terminalCause: string;
 }
 
 async function runCase(prompt: string, runId: string): Promise<Trace> {
-  const trace: Trace = { thinking: '', toolCalls: [], delegateCalls: [], terminalCause: 'none' };
+  const trace: Trace = { thinking: '', finalText: '', toolCalls: [], delegateCalls: [], terminalCause: 'none' };
 
   // Recording stub: capture the routing decision, return a canned success so PI
   // continues its loop as if the sub-agent had finished.
@@ -179,6 +180,7 @@ async function runCase(prompt: string, runId: string): Promise<Trace> {
     {
       emit(ev: EngineEvent) {
         if (ev.type === 'stream_chunk') trace.thinking += ev.text;
+        else if (ev.type === 'final_text') trace.finalText = ev.text;
         else if (ev.type === 'tool_call') trace.toolCalls.push({ name: ev.name, args: ev.args });
         else if (ev.type === 'terminal') trace.terminalCause = ev.cause;
       },
@@ -211,7 +213,7 @@ function score(c: Case, t: Trace): Verdict {
       notes.push(`  → ${d.harness} / ${d.environment}${c.isolated ? (iso ? ' [isolated ✅]' : ' [NOT isolated ⚠️]') : ''}`);
     }
   }
-  if (!c.delegates && !didDelegate && !t.thinking.trim()) {
+  if (!c.delegates && !didDelegate && !(t.thinking.trim() || t.finalText.trim())) {
     pass = false;
     notes.push('  expected a direct answer but PI produced no text ❌');
   }
@@ -247,7 +249,7 @@ for (let loop = 0; loop < LOOPS; loop++) {
 
     console.log(`\n[${c.name}] ${v.pass ? 'PASS' : 'FAIL'}  — ${c.rationale}`);
     console.log(`  prompt:   "${c.prompt.slice(0, 90)}${c.prompt.length > 90 ? '…' : ''}"`);
-    const think = trace.thinking.trim().replace(/\s+/g, ' ');
+    const think = (trace.thinking.trim() || trace.finalText.trim()).replace(/\s+/g, ' ');
     console.log(`  thinks:   ${think ? `"${think.slice(0, 160)}${think.length > 160 ? '…' : ''}"` : '(no text)'}`);
     console.log(
       `  does:     [${trace.toolCalls.map((tc) => tc.name).join(', ') || 'no tool calls'}]  (terminal: ${trace.terminalCause})`,
