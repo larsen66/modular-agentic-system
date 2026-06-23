@@ -1,5 +1,6 @@
 // src/index.ts — entrypoint. Self-register all adapters, then start the server.
 
+import './server/wsPolyfill.js'; // MUST precede any supabase createClient (Node <22 lacks global WebSocket).
 import './server/loadEnv.js'; // MUST be first — populate .env before env reads.
 import { Kernel } from './kernel/index.js';
 import { buildServer } from './server/http.js';
