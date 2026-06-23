@@ -30,6 +30,7 @@
     "@anthropic-ai/sdk": "^0.105.0",
     "@codesandbox/sdk": "^2.4.2",
     "@daytonaio/sdk": "^0.189.0",
+    "@fastify/static": "^7.0.4",
     "@mariozechner/pi-ai": "^0.69.0",
     "@mariozechner/pi-coding-agent": "^0.69.0",
     "@openai/agents": "^0.11.8",

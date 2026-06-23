@@ -9,7 +9,11 @@
 // hands it to the Kernel. It knows nothing about containers, ports, or SDKs.
 
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { Kernel } from '../kernel/index.js';
 import { SessionOwnershipError } from '../kernel/session.js';
 import { serializeEvent } from './sse.js';
@@ -67,8 +71,38 @@ export interface MessageBody {
   skillRefs?: string[];
 }
 
+// API route prefixes. Used by the SPA fallback so genuine API 404s stay JSON
+// instead of being shadowed by index.html. Keep in sync with the routes below.
+const API_PREFIXES = [
+  '/health', '/healthz', '/registry', '/architecture', '/auth',
+  '/projects', '/preview', '/history', '/memory', '/message',
+];
+
 export function buildServer(kernel: Kernel) {
   const app = Fastify({ logger: false });
+
+  // Serve the built Studio SPA same-origin (production deploy). The explicit API
+  // routes below take precedence; with wildcard:false, @fastify/static serves
+  // existing files (assets) and any unmatched GET falls through to the
+  // notFoundHandler, which returns index.html for client-side routing — except
+  // for API prefixes, which must surface as real JSON 404s. Guarded by existence
+  // so local/dev (no studio build) still boots as a pure API server.
+  const studioDist = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../studio/dist'
+  );
+  if (fs.existsSync(path.join(studioDist, 'index.html'))) {
+    app.register(fastifyStatic, { root: studioDist, wildcard: false });
+    app.setNotFoundHandler((req, reply) => {
+      const isApi = API_PREFIXES.some(
+        (p) => req.url === p || req.url.startsWith(`${p}/`) || req.url.startsWith(`${p}?`)
+      );
+      if (req.method === 'GET' && !isApi) {
+        return reply.sendFile('index.html');
+      }
+      reply.code(404).send({ error: 'not found' });
+    });
+  }
 
   app.get('/health', async () => ({
     ok: true,
