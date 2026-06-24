@@ -63,9 +63,8 @@ export function resolveConfig(opts?: { model?: string }): ClaudeClientConfig | n
   else if (subscriptionLoginPresent()) authMode = 'subscription';
   if (!authMode) return null;
 
-  // Only Claude model ids here. We deliberately do NOT fall back to SDK_MODEL —
-  // that env var carries the OpenRouter/OpenAI model for the provider-agnostic
-  // `sdk` harness (e.g. "openai/gpt-4o-mini"), which the Agent SDK cannot run.
+  // Only Claude model ids here. Do not fall back to OpenAI/OpenRouter model envs,
+  // which the Claude Agent SDK cannot run.
   const model = opts?.model ?? process.env.CLAUDE_SDK_MODEL ?? DEFAULT_MODEL;
   return {
     apiKey: apiKey || undefined,

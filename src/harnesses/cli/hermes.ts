@@ -30,7 +30,6 @@ function hermesModel(): string {
   return (
     process.env.HERMES_CLI_MODEL ||
     process.env.HERMES_INFERENCE_MODEL ||
-    process.env.SDK_MODEL ||
     process.env.OPENAI_AGENTS_MODEL ||
     'openai/gpt-4o-mini'
   );
@@ -49,6 +48,9 @@ function parseLine(line: string): ParsedCliEvent[] {
 const SPEC: CliSpec = {
   ref: 'hermes-cli',
   bin: 'hermes',
+  sandboxSupported: true,
+  sandboxInstallHint:
+    'For Docker set HERMES_DOCKER_IMAGE to an image with the hermes binary, or pass runtimeProfile for such an image/template.',
   // `chat -q --quiet` is Hermes' documented single-query programmatic path. We
   // add `--yolo` because the workspace is an isolated per-session temp dir and
   // the runner owns post-generation verification. The terminal toolset gives

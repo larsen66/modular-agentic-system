@@ -3,7 +3,7 @@
 // generation with ZERO configuration. The rule (composition-root policy — lives
 // outside the kernel):
 //
-//   1) An API key set       → the provider-agnostic `sdk` harness (mode 1, docker).
+//   1) An OpenAI-compatible API key set → `openai-agents` on docker.
 //   2) No key, but a CLI     → a CLI-credential harness on the `local` env
 //      login is present         (Hermes preferred, else Claude, else Codex). Real
 //                               generation, no key.
@@ -35,9 +35,9 @@ export function recommendDefaultsFromStatus(args: {
   const { hasApiKey, hermes, claude, codex } = args;
   if (hasApiKey) {
     return {
-      harness: 'sdk',
+      harness: 'openai-agents',
       environment: 'docker',
-      reason: 'API key present → SDK harness on docker',
+      reason: 'API key present → openai-agents on docker',
       hasApiKey,
       hermes,
       claude,
@@ -89,7 +89,7 @@ export function recommendDefaultsFromStatus(args: {
 }
 
 export function recommendDefaults(): DefaultSelection {
-  const hasApiKey = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY);
+  const hasApiKey = !!(process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY);
   const hermes = detectHermes();
   const claude = detectClaude();
   const codex = detectCodex();

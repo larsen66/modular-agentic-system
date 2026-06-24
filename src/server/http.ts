@@ -31,9 +31,6 @@ import {
   promptWithSessionMemory,
   updateSessionMemory,
 } from './sessionMemory.js';
-// Health/diagnostics only: report whether the SDK harness would hit a REAL model.
-// (The server is the composition root — it may know adapters; the kernel does not.)
-import { describeSdk } from '../harnesses/sdk/providers/index.js';
 // Composition-root policy: recommend the zero-config default (harness,environment)
 // pair so the Studio auto-selects real generation (CLI login → real, no key).
 import { recommendDefaults } from '../harnesses/cli/defaults.js';
@@ -69,6 +66,31 @@ export interface MessageBody {
   // the orchestrator applies its default builder set.
   toolRefs?: string[];
   skillRefs?: string[];
+}
+
+function sandboxEnvFor(harness: string): Record<string, string> | undefined {
+  if (harness !== 'hermes-cli') return undefined;
+  const allowed = [
+    'OPENROUTER_API_KEY',
+    'OPENROUTER',
+    'HERMES_CLI_MODEL',
+    'HERMES_INFERENCE_MODEL',
+    'OPENAI_AGENTS_MODEL',
+  ];
+  const env: Record<string, string> = {};
+  for (const key of allowed) {
+    const value = process.env[key];
+    if (value?.trim()) env[key] = value;
+  }
+  return Object.keys(env).length ? env : undefined;
+}
+
+function runtimeProfileFor(harness: string, environment: string, requested?: string): string | undefined {
+  if (requested) return requested;
+  if (harness === 'hermes-cli' && environment === 'docker') {
+    return process.env.HERMES_DOCKER_IMAGE || 'modular-runner-hermes:local';
+  }
+  return undefined;
 }
 
 // API route prefixes. Used by the SPA fallback so genuine API 404s stay JSON
@@ -110,16 +132,11 @@ export function buildServer(kernel: Kernel) {
     environments: kernel.listEnvironments(),
   }));
 
-  // Honest readiness probe: does the shipped `sdk` harness have what it needs to
-  // call a REAL model right now? `sdk.real` is true only with a genuine API key
-  // (no mock base-URL override). Never exposes the key value.
   app.get('/healthz', async () => {
-    const sdk = describeSdk();
     return {
       ok: true,
       harnesses: kernel.listHarnesses(),
       environments: kernel.listEnvironments(),
-      sdk: { real: sdk.real, provider: sdk.provider, model: sdk.model, mode: sdk.mode },
     };
   });
 
@@ -349,7 +366,8 @@ export function buildServer(kernel: Kernel) {
         harness,
         environment,
         source: body.source ?? { kind: 'files', files: [] },
-        runtimeProfile: body.runtimeProfile,
+        runtimeProfile: runtimeProfileFor(harness, environment, body.runtimeProfile),
+        env: sandboxEnvFor(harness),
         model,
         topology: body.topology,
         ports: body.ports,

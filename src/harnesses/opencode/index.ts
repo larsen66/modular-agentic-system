@@ -117,7 +117,7 @@ async function requireOpencodeCli(
     throw new Error(
       `opencode CLI is not installed inside the selected environment. ` +
         `Use environment=local with a host opencode install, or choose an agent-as-tool harness ` +
-        `such as openai-agents/sdk for managed sandboxes like daytona. Preflight: ${detail}`
+        `such as openai-agents for managed sandboxes like daytona. Preflight: ${detail}`
     );
   }
   const lines = probe.stdout.trim().split(/\r?\n/).filter(Boolean);

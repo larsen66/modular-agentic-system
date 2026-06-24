@@ -41,8 +41,7 @@ export function resolveConfig(opts?: { model?: string }): OpenAiAgentsConfig {
     process.env.OPENAI_AGENTS_BASE_URL ??
     ''
   ).replace(/\/$/, '');
-  const model =
-    opts?.model ?? process.env.OPENAI_AGENTS_MODEL ?? process.env.SDK_MODEL ?? DEFAULT_MODEL;
+  const model = opts?.model ?? process.env.OPENAI_AGENTS_MODEL ?? DEFAULT_MODEL;
 
   const hasBase = baseUrl.length > 0;
   const hasKey = apiKey.length > 0;

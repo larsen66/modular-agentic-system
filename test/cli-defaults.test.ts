@@ -5,7 +5,7 @@ const absent = { installed: false, loggedIn: false };
 const ready = { installed: true, loggedIn: true };
 
 describe('CLI harness default selection', () => {
-  it('prefers the SDK harness when an API key is present', () => {
+  it('prefers the OpenAI Agents harness when an API key is present', () => {
     expect(
       recommendDefaultsFromStatus({
         hasApiKey: true,
@@ -13,7 +13,7 @@ describe('CLI harness default selection', () => {
         claude: ready,
         codex: ready,
       }).harness
-    ).toBe('sdk');
+    ).toBe('openai-agents');
   });
 
   it('prefers Hermes among zero-key CLI harnesses', () => {

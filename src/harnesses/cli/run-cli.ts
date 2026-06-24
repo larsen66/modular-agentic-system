@@ -88,6 +88,11 @@ export interface CliSpec {
   // Build the argv (after the binary) for a headless, file-writing run in cwd.
   buildArgs: (prompt: string) => string[];
   bin: string; // 'claude' | 'codex'
+  // Most local-login CLIs must stay on the host. Hermes can also run inside a
+  // sandbox when the selected environment image/template has the binary and
+  // provider env vars are injected.
+  sandboxSupported?: boolean;
+  sandboxInstallHint?: string;
   authDescription?: string | (() => string);
   // Parse one stdout line of the CLI's stream into normalized events. Return the
   // events to emit for that line (may be empty). Keep it tolerant: unknown lines
@@ -150,6 +155,48 @@ function runBinary(
   });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function emitParsedLine(spec: CliSpec, line: string, io: RunIO, usage: { inTok: number; outTok: number }): void {
+  for (const ev of spec.parseLine(line)) {
+    if (ev.kind === 'text') io.emit({ type: 'stream_chunk', text: ev.text });
+    else if (ev.kind === 'tool_call')
+      io.emit({
+        type: 'tool_call',
+        name: ev.name,
+        args: ev.argsSummary ? { summary: ev.argsSummary } : undefined,
+        callId: ev.callId,
+      });
+    else if (ev.kind === 'tool_result')
+      io.emit({ type: 'tool_result', ok: ev.ok, output: ev.output, callId: ev.callId });
+    else if (ev.kind === 'usage') {
+      usage.inTok += ev.inputTokens;
+      usage.outTok += ev.outputTokens;
+    }
+  }
+}
+
+function lineSink(onLine: (line: string) => void): { write: (chunk: string) => void; flush: () => void } {
+  let buf = '';
+  return {
+    write(chunk: string) {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (line.trim()) onLine(line);
+      }
+    },
+    flush() {
+      if (buf.trim()) onLine(buf);
+      buf = '';
+    },
+  };
+}
+
 export async function runCliHarness(
   spec: CliSpec,
   task: RunTask,
@@ -159,10 +206,9 @@ export async function runCliHarness(
   const log = (level: 'info' | 'warn' | 'error', message: string) =>
     io.emit({ type: 'log', category: 'harness', level, message, at: Date.now() });
 
-  // The CLI writes files into its cwd, so it needs a real host dir. Only the
-  // LOCAL env exposes one. Fail clearly (not silently) on any other env.
-  if (!isLocalWorkspaceHandle(env)) {
-    log('error', `${spec.ref} requires the "local" environment (CLI writes to a host dir)`);
+  const localEnv = isLocalWorkspaceHandle(env);
+  if (!localEnv && !spec.sandboxSupported) {
+    log('error', `${spec.ref} requires the "local" environment (CLI writes via a host-local login)`);
     io.emit({
       type: 'terminal',
       cause: 'error',
@@ -173,54 +219,70 @@ export async function runCliHarness(
     });
     return;
   }
-  const cwd = env.hostPath();
+  const cwd = localEnv ? env.hostPath() : undefined;
 
-  let inTok = 0;
-  let outTok = 0;
+  const usage = { inTok: 0, outTok: 0 };
 
   // 1) Run the CLI headless in the workspace.
   const authDescription =
     typeof spec.authDescription === 'function'
       ? spec.authDescription()
       : spec.authDescription ?? 'existing login, no API key';
-  log('info', `invoking ${spec.bin} (headless, ${authDescription})`);
   const args = spec.buildArgs(buildPrompt(task.prompt));
   let exitCode = 0;
-  try {
-    exitCode = await runBinary(
-      spec.bin,
-      args,
-      cwd,
-      task.signal,
-      (line) => {
-        for (const ev of spec.parseLine(line)) {
-          if (ev.kind === 'text') io.emit({ type: 'stream_chunk', text: ev.text });
-          else if (ev.kind === 'tool_call')
-            io.emit({
-              type: 'tool_call',
-              name: ev.name,
-              args: ev.argsSummary ? { summary: ev.argsSummary } : undefined,
-              callId: ev.callId,
-            });
-          else if (ev.kind === 'tool_result')
-            io.emit({ type: 'tool_result', ok: ev.ok, output: ev.output, callId: ev.callId });
-          else if (ev.kind === 'usage') {
-            inTok += ev.inputTokens;
-            outTok += ev.outputTokens;
-          }
+
+  if (localEnv) {
+    log('info', `invoking ${spec.bin} on host (headless, ${authDescription})`);
+    try {
+      exitCode = await runBinary(
+        spec.bin,
+        args,
+        cwd!,
+        task.signal,
+        (line) => emitParsedLine(spec, line, io, usage),
+        (chunk) => {
+          // CLI diagnostics → activity log (warn). Never the model output channel.
+          const t = chunk.trim();
+          if (t) log('warn', `${spec.bin}: ${t.slice(0, 200)}`);
         }
-      },
-      (chunk) => {
-        // CLI diagnostics → activity log (warn). Never the model output channel.
-        const t = chunk.trim();
-        if (t) log('warn', `${spec.bin}: ${t.slice(0, 200)}`);
-      }
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log('error', `${spec.bin} failed to start: ${message}`);
-    io.emit({ type: 'terminal', cause: 'error', error: { code: 'cli_spawn_failed', message } });
-    return;
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log('error', `${spec.bin} failed to start: ${message}`);
+      io.emit({ type: 'terminal', cause: 'error', error: { code: 'cli_spawn_failed', message } });
+      return;
+    }
+  } else {
+    const check = await env.exec(`command -v ${shellQuote(spec.bin)}`, { timeoutMs: 30_000 });
+    if ('poll' in check || check.exitCode !== 0) {
+      const hint = spec.sandboxInstallHint ? ` ${spec.sandboxInstallHint}` : '';
+      const message = `${spec.bin} is not installed inside the selected environment.${hint}`;
+      log('error', message);
+      io.emit({ type: 'terminal', cause: 'error', error: { code: 'cli_missing_in_env', message } });
+      return;
+    }
+
+    log('info', `invoking ${spec.bin} inside environment (headless, ${authDescription})`);
+    const stdout = lineSink((line) => emitParsedLine(spec, line, io, usage));
+    const stderr = lineSink((line) => log('warn', `${spec.bin}: ${line.slice(0, 200)}`));
+    const cmd = [spec.bin, ...args].map(shellQuote).join(' ');
+    const result = await env.exec(cmd, {
+      timeoutMs: 300_000,
+      onStdout: (chunk) => stdout.write(chunk),
+      onStderr: (chunk) => stderr.write(chunk),
+    });
+    stdout.flush();
+    stderr.flush();
+    if ('poll' in result) {
+      log('error', `${spec.bin} returned a background process for a foreground run`);
+      io.emit({
+        type: 'terminal',
+        cause: 'error',
+        error: { code: 'cli_exec_failed', message: `${spec.bin} did not return an exit code.` },
+      });
+      return;
+    }
+    exitCode = result.exitCode;
   }
 
   if (task.signal.aborted) {
@@ -290,7 +352,8 @@ export async function runCliHarness(
   }
 
   // 4) Start the dev server detached, pinned to a known host/port.
-  const cmd = `npm run dev -- --host 127.0.0.1 --port ${DEV_PORT} --strictPort`;
+  const host = localEnv ? '127.0.0.1' : '0.0.0.0';
+  const cmd = `npm run dev -- --host ${host} --port ${DEV_PORT} --strictPort`;
   io.emit({ type: 'tool_call', name: 'run_command', args: { cmd, background: true } });
   await env.exec(cmd, { cwd, detached: true });
   io.emit({ type: 'tool_result', ok: true, output: `[started] dev server on :${DEV_PORT}` });
@@ -312,7 +375,7 @@ export async function runCliHarness(
     return;
   }
 
-  io.emit({ type: 'usage_delta', inputTokens: inTok, outputTokens: outTok });
+  io.emit({ type: 'usage_delta', inputTokens: usage.inTok, outputTokens: usage.outTok });
   io.emit({ type: 'terminal', cause: 'done' });
 }
 

@@ -83,10 +83,6 @@ const PROMPT =
 const DEFAULT_CELL_TIMEOUT_MS = 8 * 60 * 1000;
 
 const READY_MATRIX: MatrixCell[] = [
-  { harness: 'sdk', environment: 'docker', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY'], expectPreview: true },
-  { harness: 'sdk', environment: 'e2b', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'E2B_API_KEY'], expectPreview: true },
-  { harness: 'sdk', environment: 'daytona', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'DAYTONA_API_KEY'], expectPreview: true },
-  { harness: 'sdk', environment: 'codesandbox', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'CSB_API_KEY'], expectPreview: true },
   { harness: 'openai-agents', environment: 'docker', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY'], expectPreview: true },
   { harness: 'openai-agents', environment: 'e2b', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'E2B_API_KEY'], expectPreview: true },
   { harness: 'openai-agents', environment: 'daytona', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'DAYTONA_API_KEY'], expectPreview: true },
@@ -168,7 +164,6 @@ function applyKeys(): void {
     process.env.OPENROUTER_API_KEY = openRouter;
     process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || openRouter;
     process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
-    process.env.SDK_MODEL = process.env.SDK_MODEL || 'openai/gpt-4o-mini';
     process.env.OPENAI_AGENTS_MODEL = process.env.OPENAI_AGENTS_MODEL || 'openai/gpt-4o-mini';
   }
 }

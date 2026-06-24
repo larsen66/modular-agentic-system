@@ -8,8 +8,8 @@
 // allow ONLY these four (see index.ts allowedTools + canUseTool).
 //
 // Tool shapes + dispatch behaviour are kept identical to the provider-agnostic
-// `sdk` harness so the adapters stay swap-equal; only the registration surface
-// (Agent SDK MCP vs raw Anthropic `tools`) differs.
+// OpenAI Agents harness so the adapters stay swap-equal; only the registration
+// surface (Agent SDK MCP vs OpenAI Agents tools) differs.
 
 import { z } from 'zod';
 import type { EnvironmentHandle, RunIO } from '../../types/index.js';

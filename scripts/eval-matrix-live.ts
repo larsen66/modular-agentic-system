@@ -20,8 +20,8 @@
 // Run:
 //   npx tsx scripts/eval-matrix-live.ts --dry-run            # print the matrix, no runs
 //   EVAL_BEARER=… npx tsx scripts/eval-matrix-live.ts        # full live matrix
-//   npx tsx scripts/eval-matrix-live.ts --only sdk:e2b:agent-as-tool
-//   npx tsx scripts/eval-matrix-live.ts --harness sdk,pi --max 6 --loops 2
+//   npx tsx scripts/eval-matrix-live.ts --only openai-agents:e2b:agent-as-tool
+//   npx tsx scripts/eval-matrix-live.ts --harness openai-agents,pi --max 6 --loops 2
 
 import fs from 'node:fs';
 import path from 'node:path';

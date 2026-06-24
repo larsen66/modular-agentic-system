@@ -17,7 +17,6 @@ import {
   fetchRegistry,
   login,
   fetchProjects,
-  setAuthToken,
   type EngineEvent,
   type AuthUser,
   type ProjectItem,
@@ -28,13 +27,44 @@ import ActivityLog, { type EventRecord, type RunHeader } from './ActivityLog';
 import ArchitectureFlow from './ArchitectureFlow';
 
 interface ChatMessage {
+  id: string;
   role: 'user' | 'assistant';
   text: string;
   events: string[]; // event-type trace for this turn
 }
 
 const SESSION_PREFIX = 'studio-';
+const DEFAULT_TEST_EMAIL = 'alice@local.test';
+const DEFAULT_TEST_PASSWORD = 'password';
 type StudioView = 'runner' | 'architecture';
+
+function assistantMessageFromRecords(records: EventRecord[], fallbackId: string): ChatMessage {
+  let text = '';
+  const events: string[] = [];
+
+  for (const { ev } of records) {
+    if (ev.type === 'log') continue;
+    events.push(ev.type);
+    if (ev.type === 'stream_chunk') text += ev.text;
+    else if (ev.type === 'final_text' && !text) text = ev.text;
+    else if (ev.type === 'tool_call') text += `\n[tool: ${ev.name}]`;
+  }
+
+  return {
+    id: fallbackId,
+    role: 'assistant',
+    text: text.trim() || 'No assistant text was recorded for this run.',
+    events,
+  };
+}
+
+function previewUrlFromRecords(records: EventRecord[]): string | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const ev = records[i]?.ev;
+    if (ev?.type === 'preview_ready') return ev.url;
+  }
+  return null;
+}
 
 // Human labels for the execution-topology toggle.
 const TOPOLOGY_LABEL: Record<ExecutionTopology, string> = {
@@ -76,8 +106,6 @@ export default function App() {
   // ── auth + project scope (per-user isolation) ────────────────────────────
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authVersion, setAuthVersion] = useState(0); // 0 = logged out
-  const [email, setEmail] = useState('alice@local.test');
-  const [password, setPassword] = useState('password');
   const [authError, setAuthError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -88,8 +116,8 @@ export default function App() {
   const [readyPairs, setReadyPairs] = useState<string[]>([]);
   // Per-harness topologies + per-env hostsAgentRuntime — drives the topology toggle.
   const [topologyMatrix, setTopologyMatrix] = useState<TopologyMatrix | null>(null);
-  const [harness, setHarness] = useState('dummy');
-  const [environment, setEnvironment] = useState('dummy');
+  const [harness, setHarness] = useState('');
+  const [environment, setEnvironment] = useState('');
   // The selected execution topology (agent-as-tool ↔ agent-in-sandbox), kept in
   // sync with what the current (harness, env) pair actually supports.
   const [topology, setTopology] = useState<ExecutionTopology | null>(null);
@@ -106,6 +134,7 @@ export default function App() {
   const logRef = useRef<HTMLDivElement>(null);
   const seqRef = useRef(0);
   const runStartRef = useRef(0);
+  const autoLoginStartedRef = useRef(false);
   const sessionRef = useRef(`${SESSION_PREFIX}${Date.now()}`);
 
   // Load the two registry listings to populate the dropdowns. This is the swap
@@ -127,9 +156,11 @@ export default function App() {
         if (d) setDefaultHint(d.reason);
       })
       .catch(() => {
-        // Backend not up yet — keep the dummy defaults.
-        setHarnesses(['dummy', 'dummy-echo']);
-        setEnvironments(['dummy']);
+        // Backend not up yet: leave adapter lists empty so the UI does not offer
+        // stale refs that are not registered by the current source tree.
+        setHarnesses([]);
+        setEnvironments([]);
+        setDefaultHint('Backend unavailable');
       });
   }, []);
 
@@ -137,34 +168,29 @@ export default function App() {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [messages]);
 
-  // Log in through the runner (GoTrue proxy), then load the user's RLS-scoped
-  // projects. Bumping authVersion makes the Activity Log re-fetch history under
-  // the new identity.
-  const doLogin = useCallback(async () => {
+  // Log in through the runner (GoTrue proxy) with the fixed local test account,
+  // then load that user's RLS-scoped projects. Bumping authVersion makes the
+  // Activity Log re-fetch history under the default identity.
+  const signInDefaultUser = useCallback(async () => {
     setAuthError(null);
     try {
-      const user = await login(email, password);
+      const user = await login(DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD);
       setCurrentUser(user);
       setAuthVersion((v) => v + 1);
       const ps = await fetchProjects();
       setProjects(ps);
       setProjectId(ps[0]?.id ?? null);
     } catch {
-      setAuthError('login failed — check email/password');
+      setAuthError('test account unavailable');
       setCurrentUser(null);
     }
-  }, [email, password]);
-
-  const doLogout = useCallback(() => {
-    setAuthToken(null);
-    setCurrentUser(null);
-    setProjects([]);
-    setProjectId(null);
-    setAuthVersion(0);
-    setMessages([]);
-    setLiveRecords([]);
-    setLiveHeader(null);
   }, []);
+
+  useEffect(() => {
+    if (autoLoginStartedRef.current) return;
+    autoLoginStartedRef.current = true;
+    void signInDefaultUser();
+  }, [signInDefaultUser]);
 
   // Compatibility model. `readyPairs` is the verified (harness × environment)
   // matrix; from it we derive, for the CURRENT selection in one dropdown, which
@@ -241,9 +267,11 @@ export default function App() {
   };
 
   const send = useCallback(async () => {
-    if (!prompt.trim() || running) return;
-    const userMsg: ChatMessage = { role: 'user', text: prompt, events: [] };
-    const assistantMsg: ChatMessage = { role: 'assistant', text: '', events: [] };
+    if (!prompt.trim() || running || !harness || !environment) return;
+    const turnId = `${Date.now()}`;
+    const assistantId = `assistant-${turnId}`;
+    const userMsg: ChatMessage = { id: `user-${turnId}`, role: 'user', text: prompt, events: [] };
+    const assistantMsg: ChatMessage = { id: assistantId, role: 'assistant', text: '', events: [] };
     setMessages((m) => [...m, userMsg, assistantMsg]);
     const promptSnapshot = prompt;
     setPrompt('');
@@ -268,19 +296,18 @@ export default function App() {
       previewUrl: null,
     });
 
-    const idx = messages.length + 1; // index of the assistant message just pushed
-
     const applyEvent = (ev: EngineEvent) => {
       setMessages((m) => {
+        const targetIndex = m.findIndex((msg) => msg.id === assistantId);
+        if (targetIndex < 0) return m;
         const next = [...m];
-        const target = next[idx];
-        if (!target) return m;
+        const target = next[targetIndex];
         const updated: ChatMessage = { ...target, events: [...target.events, ev.type] };
         if (ev.type === 'stream_chunk') updated.text += ev.text;
         else if (ev.type === 'final_text' && !updated.text) updated.text = ev.text;
         else if (ev.type === 'tool_call')
           updated.text += `\n[tool: ${ev.name}]`;
-        next[idx] = updated;
+        next[targetIndex] = updated;
         return next;
       });
     };
@@ -348,7 +375,12 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [prompt, running, harness, environment, topology, messages.length, projectId]);
+  }, [prompt, running, harness, environment, topology, projectId]);
+
+  const displayRunFromActivity = useCallback((records: EventRecord[], header: RunHeader | null) => {
+    setPreviewUrl(previewUrlFromRecords(records));
+    setMessages([assistantMessageFromRecords(records, `replay-${header?.runId ?? Date.now()}`)]);
+  }, []);
 
   const resetSession = () => {
     sessionRef.current = `${SESSION_PREFIX}${Date.now()}`;
@@ -382,34 +414,18 @@ export default function App() {
             </Button>
           </nav>
           <HeaderGlobalBar>
-            {/* Per-user identity bar. Logged out → email/password; logged in →
-                whoami + logout. Drives the RLS-scoped project + history views. */}
+            {/* Fixed test-account identity. Drives the RLS-scoped project + history views. */}
             {currentUser ? (
               <div className="auth-bar">
                 <Tag type="blue" size="sm">{currentUser.email}</Tag>
-                <Button kind="ghost" size="sm" onClick={doLogout}>Log out</Button>
               </div>
             ) : (
               <div className="auth-bar">
-                <input
-                  className="auth-input"
-                  aria-label="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="email"
-                  onKeyDown={(e) => e.key === 'Enter' && doLogin()}
-                />
-                <input
-                  className="auth-input"
-                  aria-label="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="password"
-                  onKeyDown={(e) => e.key === 'Enter' && doLogin()}
-                />
-                <Button kind="primary" size="sm" onClick={doLogin}>Log in</Button>
-                {authError && <Tag type="red" size="sm">{authError}</Tag>}
+                {authError ? (
+                  <Tag type="red" size="sm">{authError}</Tag>
+                ) : (
+                  <InlineLoading description="Test account…" />
+                )}
               </div>
             )}
             <HeaderGlobalAction aria-label="New session" onClick={resetSession}>
@@ -516,7 +532,9 @@ export default function App() {
                     states are surfaced so the empty history is never a mystery. */}
                 <div className="scope-bar">
                   {!currentUser ? (
-                    <Tag type="gray" size="sm">Log in to run &amp; see your history</Tag>
+                    <Tag type={authError ? 'red' : 'gray'} size="sm">
+                      {authError ?? 'Preparing test account'}
+                    </Tag>
                   ) : projects.length === 0 ? (
                     <Tag type="magenta" size="sm">No projects for {currentUser.email} — isolated, nothing to run</Tag>
                   ) : (
@@ -540,8 +558,8 @@ export default function App() {
                       Pick a harness × environment, type a prompt, and send.
                     </div>
                   )}
-                  {messages.map((m, i) => (
-                    <div key={i} className={`msg msg-${m.role}`}>
+                  {messages.map((m) => (
+                    <div key={m.id} className={`msg msg-${m.role}`}>
                       {m.text || (m.role === 'assistant' && running ? '…' : '')}
                       {m.role === 'assistant' && m.events.length > 0 && (
                         <div className="event-trace">
@@ -574,7 +592,7 @@ export default function App() {
                     <Button
                       renderIcon={Send}
                       onClick={send}
-                      disabled={!prompt.trim() || !currentUser || !projectId}
+                      disabled={!prompt.trim() || !currentUser || !projectId || !harness || !environment}
                     >
                       Send
                     </Button>
@@ -610,7 +628,13 @@ export default function App() {
             {/* BOTTOM: Activity Log — full EngineEvent stream for the live run, plus
                 cross-run history browse/replay and debug tooling (filters, search,
                 timestamps, raw JSON, copy/export). See studio/src/ActivityLog.tsx. */}
-            <ActivityLog liveRecords={liveRecords} liveHeader={liveHeader} running={running} authVersion={authVersion} />
+            <ActivityLog
+              liveRecords={liveRecords}
+              liveHeader={liveHeader}
+              running={running}
+              authVersion={authVersion}
+              onReplaySelected={displayRunFromActivity}
+            />
           </>
         ) : (
           <ArchitectureFlow />

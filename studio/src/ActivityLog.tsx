@@ -69,6 +69,44 @@ interface ActivityLogProps {
   // identity (the list is RLS-scoped server-side — a different user, a different
   // set of rows). Also gates fetching: 0 = logged out, show nothing.
   authVersion: number;
+  // Lets the main chat/preview pane render the same event stream that the
+  // Activity Log is replaying from history.
+  onReplaySelected?: (records: EventRecord[], header: RunHeader | null) => void;
+}
+
+function recordsFromReplay(run: PersistedRun): EventRecord[] {
+  return run.events.map((row, i) => {
+    const ev = row.data;
+    const at = ev.type === 'log' ? ev.at : new Date(row.ts).getTime();
+    return { ev, at, seq: i };
+  });
+}
+
+function previewUrlFromRecords(records: EventRecord[]): string | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const ev = records[i]?.ev;
+    if (ev?.type === 'preview_ready') return ev.url;
+  }
+  return null;
+}
+
+function headerFromReplay(run: PersistedRun, records: EventRecord[]): RunHeader {
+  const r = run.run;
+  const usage = r.summary?.usage ?? {};
+  return {
+    runId: r.id,
+    harnessRef: r.provider ?? '—',
+    envRef: r.session_id ? `session ${r.session_id.slice(0, 8)}` : '—',
+    model: r.model,
+    prompt: r.summary?.finalText ?? '',
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    cost: r.summary?.cost ?? 0,
+    durationMs: r.duration_ms,
+    terminalCause: r.summary?.cause ?? (r.status === 'succeeded' ? 'done' : r.status === 'failed' ? 'error' : null),
+    sandboxId: null,
+    previewUrl: previewUrlFromRecords(records),
+  };
 }
 
 // Extract a human one-line summary for an event row.
@@ -162,7 +200,7 @@ function downloadJson(filename: string, data: unknown): void {
   URL.revokeObjectURL(url);
 }
 
-export default function ActivityLog({ liveRecords, liveHeader, running, authVersion }: ActivityLogProps) {
+export default function ActivityLog({ liveRecords, liveHeader, running, authVersion, onReplaySelected }: ActivityLogProps) {
   // Mode: 'live' shows the in-flight run; 'replay' shows a past run loaded from
   // /history/:runId. Selecting a history row flips to replay; "Live" returns.
   const [mode, setMode] = useState<'live' | 'replay'>('live');
@@ -180,38 +218,14 @@ export default function ActivityLog({ liveRecords, liveHeader, running, authVers
   // A run is the live one OR the replayed one. Derive records + header uniformly.
   const records: EventRecord[] = useMemo(() => {
     if (mode === 'replay' && replayRun) {
-      // Persisted run_events: each row's `.data` is the original EngineEvent,
-      // ordered by `.seq`. Use the row timestamp (or log.at) for the timeline.
-      return replayRun.events.map((row, i) => {
-        const ev = row.data;
-        const at = ev.type === 'log' ? ev.at : new Date(row.ts).getTime();
-        return { ev, at, seq: i };
-      });
+      return recordsFromReplay(replayRun);
     }
     return liveRecords;
   }, [mode, replayRun, liveRecords]);
 
   const header: RunHeader | null = useMemo(() => {
     if (mode === 'replay' && replayRun) {
-      const r = replayRun.run;
-      const usage = r.summary?.usage ?? {};
-      // The view doesn't project harness/env/prompt (prod runs carry them in
-      // admission/summary, not surfaced here). Show what the RLS row gives;
-      // terminalCause derives from status.
-      return {
-        runId: r.id,
-        harnessRef: r.provider ?? '—',
-        envRef: r.session_id ? `session ${r.session_id.slice(0, 8)}` : '—',
-        model: r.model,
-        prompt: r.summary?.finalText ?? '',
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        cost: r.summary?.cost ?? 0,
-        durationMs: r.duration_ms,
-        terminalCause: r.summary?.cause ?? (r.status === 'succeeded' ? 'done' : r.status === 'failed' ? 'error' : null),
-        sandboxId: null,
-        previewUrl: null,
-      };
+      return headerFromReplay(replayRun, recordsFromReplay(replayRun));
     }
     return liveHeader;
   }, [mode, replayRun, liveHeader]);
@@ -248,9 +262,12 @@ export default function ActivityLog({ liveRecords, liveHeader, running, authVers
   const openRun = async (runId: string) => {
     const run = await fetchRun(runId);
     if (run) {
+      const replayRecords = recordsFromReplay(run);
+      const replayHeader = headerFromReplay(run, replayRecords);
       setReplayRun(run);
       setMode('replay');
       setExpanded(new Set());
+      onReplaySelected?.(replayRecords, replayHeader);
     }
   };
 

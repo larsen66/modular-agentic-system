@@ -111,7 +111,7 @@ export interface HarnessEnvCatalog {
 }
 
 // Extra per-run context handed to a MAIN harness so it can route. Optional on
-// run(): single-purpose harnesses (cli/opencode/sdk) ignore it; only a router
+// run(): single-purpose harnesses (cli/opencode/openai-agents) ignore it; only a router
 // harness (pi) reads it. `depth` is the recursion level (0 = top-level entry).
 export interface RunContext {
   delegate: Delegator;
@@ -121,11 +121,11 @@ export interface RunContext {
 
 export interface Harness {
   // the adapter (registry value)
-  readonly ref: string; // 'opencode' | 'sdk' | 'claude-cli' …
+  readonly ref: string; // 'opencode' | 'openai-agents' | 'claude-cli' …
   readonly capabilities: HarnessCapabilities;
   // `kit` is the resolved tools+skills for this run. Optional for backward
   // compatibility: harnesses that own their own tool loop (cli/opencode/pi/…)
-  // ignore it; kit-consuming harnesses (sdk) render kit.tools into their native
+  // ignore it; kit-consuming harnesses render kit.tools into their native
   // shape and dispatch via kit.byRef.
   // `ctx` carries the delegation seam for a MAIN/router harness (pi); other
   // harnesses ignore it.

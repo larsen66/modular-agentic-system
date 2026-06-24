@@ -8,9 +8,6 @@
 // orchestrator can resolve its default kit.
 import '../tools/index.js';
 import '../skills/index.js';
-// The REAL SDK harness (mode 1). Self-registers on import; it constructs its LLM
-// provider lazily at run() time, so importing it is safe even without an API key.
-import '../harnesses/sdk/index.js';
 // The LOCAL environment (host temp dir + child_process). Required by the
 // CLI-credential harnesses, which write into a real host cwd.
 import '../environments/local/index.js';

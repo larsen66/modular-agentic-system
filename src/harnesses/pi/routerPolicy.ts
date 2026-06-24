@@ -47,7 +47,6 @@ export function buildRouterPreamble(userPrompt: string): string {
 // model's choice. Topologies come from the LIVE catalog (can't drift); these
 // only describe fit. Unknown refs fall back to a generic line in the renderer.
 export const HARNESS_PURPOSE: Record<string, string> = {
-  sdk: 'lightweight LLM+tool loop — general bounded tasks, quick edits, one-shot work',
   opencode:
     'full coding agent that lives INSIDE the sandbox — best for scaffolding/building apps and long interactive dev sessions with a running server',
   'claude-agent-sdk':

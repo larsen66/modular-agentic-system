@@ -16,7 +16,7 @@
 // fake from a localhost mock), the preview URL, the HTTP status, and a ~300-char
 // HTML snippet.
 //
-// Sibling to scripts/real-e2e.ts (sdk × docker) and scripts/verify-real.ts. This
+// Sibling to the harness/environment verification scripts. This
 // one exercises the CLOUD envs (e2b, daytona) + the real OpenRouter model.
 //
 // KEYS: sourced from ../.harness.env (E2B, Daytona, …). The model key is

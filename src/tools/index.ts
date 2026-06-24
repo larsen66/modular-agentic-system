@@ -17,7 +17,7 @@ import { isProcessHandle } from '../types/index.js';
 // ── shared helpers (ported from openai-agents/execEngine.ts) ─────────────────
 
 // Per-env serialization: concurrent tool calls against one handle run in order,
-// so a write never races a read on the same workspace. The sdk loop is already
+// so a write never races a read on the same workspace. The agent loops are
 // sequential, but any concurrent-dispatch harness reusing these specs is safe.
 const toolQueues = new WeakMap<EnvironmentHandle, Promise<unknown>>();
 const backgroundLogs = new WeakMap<EnvironmentHandle, string>();

@@ -12,9 +12,8 @@ A thin **policy-only kernel** plus two registries — **Harness** and **Environm
 `dockerode`, `workspace_dir`, or any SDK client. Swapping the agent harness or the
 execution environment is a **ref-string change**.
 
-**Shipped real path:** `harness: "sdk"` (real mode-1 agent loop, Anthropic/OpenAI) ×
-`environment: "docker"` (real container + real reverse-proxy preview). The `dummy`/`dummy-echo`
-harnesses and `dummy` env exist **only as a zero-infra test rung** (CI fixtures) — not the product.
+**Shipped real path:** `harness: "openai-agents"` (official OpenAI Agents SDK loop) ×
+`environment: "docker"` (real container + real reverse-proxy preview).
 
 ```
 UI (Carbon Studio) ──POST /message──► Kernel ──resolveHarness(ref)──► Harness adapter
@@ -47,7 +46,7 @@ npm install
 npm run dev                     # → http://localhost:5173
 ```
 
-Open <http://localhost:5173>, pick **Harness = sdk** × **Environment = docker**, type
+Open <http://localhost:5173>, pick **Harness = openai-agents** × **Environment = docker**, type
 *"build me a todo app"*, hit **Send**. You'll see streamed assistant text, the per-turn
 `EngineEvent` trace, and the **Preview** pane load the live generated app from the environment's
 `exposePort()` URL.
@@ -69,8 +68,8 @@ OPENROUTER_API_KEY=sk-or-... npm start
 ```
 
 When `OPENROUTER_API_KEY` is present, the env loader sets the OpenAI-compatible route used by both
-`sdk` and `openai-agents`: `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`,
-`SDK_MODEL=openai/gpt-4o-mini`, and `OPENAI_AGENTS_MODEL=openai/gpt-4o-mini`, unless already
+`openai-agents`: `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`,
+and `OPENAI_AGENTS_MODEL=openai/gpt-4o-mini`, unless already
 overridden by the shell.
 
 ### Local CLI harnesses: Hermes, Claude, Codex
@@ -117,76 +116,11 @@ If provisioning fails with `Total disk limit exceeded`, archive or delete old st
 Daytona dashboard or CLI (`daytona list`, `daytona stop`, `daytona archive`). Use
 `DAYTONA_PERSIST_SANDBOX=1` only for a sandbox you deliberately want to recover later.
 
-### The shipped real path — one command (real harness × real Docker × real preview)
+### The shipped real path
 
-```bash
-cd builds/01-custom-ts-kernel
-npm install
-
-# With a real key → real LLM builds the app:
-ANTHROPIC_API_KEY=sk-ant-... npm run real-e2e
-#   (or)  OPENAI_API_KEY=sk-... npm run real-e2e
-
-# Without a key → identical path, with a bundled Anthropic-WIRE mock standing in for ONLY the
-# LLM brain (real Docker, real npm install, real Vite, real proxied preview — everything else real):
-npm run real-e2e
-```
-
-`real-e2e` runs `harness=sdk × environment=docker`, prints the live `EngineEvent` stream, and asserts
-the preview URL serves HTTP 200. Verified output (mock LLM, real everything else):
-
-```
-  → tool_call: write_file(package.json) … vite.config.js … index.html … src/main.jsx … src/App.jsx
-  → tool_call: run_command(npm install)        ← added 62 packages in 3m
-  → tool_call: run_command(npm run dev … :5173) background
-  ★ preview_ready: http://localhost:54651/
-  ■ terminal: done
-  real Docker container + exec/files:  YES ✓
-  preview URL serves HTTP 200:         YES ✓
-  PASS ✅
-```
-
-### `verify:real` — prove every line except model tokens is real (no key needed)
-
-```bash
-npm run verify:real
-```
-
-Drives the **REAL** SDK harness code path (provider client, agent loop, tool routing) against a local
-**OpenAI-compatible mock** (`OPENAI_BASE_URL`), hitting the **REAL Docker** backend (real container,
-real `npm install`, real Vite) with a **REAL reverse-proxied preview**. Exits non-zero unless the
-preview serves HTTP 200 with the generated app. Verified verdict:
-
-```
-provider/model:                 openai/gpt-4o (real=false)
-real harness ran tools in Docker: YES ✓
-preview_ready emitted:            YES ✓ http://localhost:<port>/
-preview served HTTP 200:          YES ✓
-settlement fired (cause=done):    YES ✓
-PASS ✅  (real harness × real Docker × real preview; only model tokens are mocked)
-```
-
-**Make it fully live:** the *same* harness calls a real model with zero code change —
-`OPENAI_API_KEY=sk-… npm run verify:real` (or `ANTHROPIC_API_KEY=sk-ant-… npm run real-e2e`).
-
-### Honest readiness probe — is the model real right now?
-
-```bash
-curl -s localhost:3000/healthz | jq .sdk
-# real key set:   { "real": true,  "provider": "anthropic", "model": "claude-sonnet-4-6", "mode": "real-key" }
-# mock base URL:  { "real": false, "provider": "openai",    "model": "gpt-4o",            "mode": "mock-base-url" }
-# nothing set:    { "real": false, "provider": null, "model": null, "mode": "unconfigured" }
-```
-
-`/healthz` reports whether the shipped `sdk` harness would hit a **real** model — never exposes the key.
-
-### Test rung (zero infra, no key, no network — CI fixture, NOT the product)
-
-```bash
-npm run demo                    # in-process Dummy×Dummy + the harness swap, prints EngineEvents
-```
-
----
+Use `openai-agents × docker` from Studio, or call `/message` with
+`{"harness":"openai-agents","environment":"docker"}`. `npm run docker-smoke`
+still proves the Docker environment path independently.
 
 ## Verify everything
 
@@ -196,9 +130,8 @@ npm run verify        # typecheck + grep acceptance gate + full test suite (one 
 # or individually:
 npm run typecheck     # tsc --noEmit, strict
 npm run grep-gate     # asserts ZERO substrate words in src/kernel, src/registry, src/types
-npm test              # vitest: registry + provider-select + Dummy×Dummy + real Docker (self-skips)
+npm test              # vitest: registry, topology, env loading, CLI defaults, Docker (self-skips)
 npm run docker-smoke  # standalone real-container proof (needs Docker running)
-npm run real-e2e      # THE real path end-to-end (real harness × real Docker × real preview)
 cd studio && npm run build   # builds the Carbon light-theme UI
 ```
 
@@ -216,7 +149,7 @@ harness (it superseded the old numeric `HarnessMode = 1 | 2`).
 
 | Topology | What runs where | Harnesses | Needs |
 |---|---|---|---|
-| `agent-as-tool` | Agent loop runs on the **control plane**; every tool call routes OUT to the opaque `EnvironmentHandle`. The harness never enters the sandbox. | `sdk`, `claude-agent-sdk`, `openai-agents` | any env (just `exec()`) |
+| `agent-as-tool` | Agent loop runs on the **control plane**; every tool call routes OUT to the opaque `EnvironmentHandle`. The harness never enters the sandbox. | `claude-agent-sdk`, `openai-agents` | any env (just `exec()`) |
 | `agent-in-sandbox` | The agent **process/server runs INSIDE the env** on its own disk; the kernel spawns + drives it via `env.exec`/`exposePort` (or a host workspace dir). | `opencode`, `pi`, `claude-cli`, `codex-cli` | `EnvironmentCapabilities.hostsAgentRuntime` plus that CLI/runtime installed inside the env |
 
 **How the toggle resolves** (`src/kernel/capabilities.ts::resolveTopology`):
@@ -235,7 +168,7 @@ Per run, the kernel picks exactly one:
 derived live from adapter capabilities — never hand-maintained) so the Studio can offer the toggle
 only for valid `(harness, env, topology)` triples. Topology support is necessary but not sufficient
 for CLI-based harnesses: `opencode` also requires the `opencode` binary inside that environment.
-The verified pair is `opencode x local`; managed sandboxes should use `openai-agents`/`sdk` unless
+The verified pair is `opencode x local`; managed sandboxes should use `openai-agents` unless
 their image explicitly installs the matching CLI. A future *dual-topology* harness (one that declares
 both) drops into this seam with zero kernel changes — that's the extension point the toggle is built for.
 
@@ -249,30 +182,15 @@ after swapping `harness` / `environment` ref strings."*
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Real agent harness — LLM calls + tool loop (mode 1) | ✅ real | `src/harnesses/sdk/` — Anthropic + OpenAI clients over real HTTP; `npm run real-e2e` drives 5 `write_file` + `npm install` + dev-server + `expose_port` tool calls |
-| Provider auto-detect (`ANTHROPIC_API_KEY` → Claude, else `OPENAI_API_KEY` → GPT) | ✅ real | `src/harnesses/sdk/providers/`; `test/provider-select.test.ts` (4 tests) |
 | OpenAI Agents SDK adapter | ✅ real | `src/harnesses/openai-agents/` — direct `@openai/agents` `Agent`, `run`, and strict-schema tools; verified with Docker from Studio |
 | Local env resolution | ✅ real | `src/server/harnessEnv.ts`; `.env` / `.harness.env` search path, friendly key aliases, OpenRouter model route, and redacted `/architecture` diagnostics |
 | Real environment — Docker container, real exec, real file sync | ✅ real | `src/environments/docker/`; `test/docker.test.ts` (4 tests); `npm run docker-smoke` |
-| Real app generated INTO the container (files + `npm install` + dev server) | ✅ real | `real-e2e` log: "added 62 packages in 3m", Vite started via hardened `nohup` background launch |
-| Real live preview via real proxied URL → HTTP 200 | ✅ real | `real-e2e` verdict: `preview_ready http://localhost:<port>/` + `serves HTTP 200 ✓`; `docs-evidence/real-e2e-run.log` |
-| Swap harness / environment by ref string | ✅ real | `sdk`↔`dummy` and `docker`↔`dummy` are pure ref-string changes; `dummy-echo` proves a 2nd harness variant |
-| Kernel policy + settlement-once + SSE stream | ✅ real | `src/kernel/`; `test/dummy-x-dummy.test.ts`; `npm start` + curl |
+| Real app generated INTO the container (files + `npm install` + dev server) | ✅ real | OpenAI Agents and CLI harnesses route file/shell work through `EnvironmentHandle` |
+| Real live preview via real proxied URL → HTTP 200 | ✅ real | Docker `exposePort` emits `preview_ready http://localhost:<port>/` |
+| Swap harness / environment by ref string | ✅ real | Harness/env adapters register by ref string through the registries |
+| Kernel policy + settlement-once + SSE stream | ✅ real | `src/kernel/`; registry/topology tests; `npm start` + curl |
 | Carbon (light) Studio — chat + live preview iframe | ✅ real | `studio/`; `cd studio && npm run build`; screenshots in `docs-evidence/` |
 | Grep acceptance gate (no substrate leak) | ✅ green | `npm run grep-gate` → `clean ✅` |
-
-### The one piece I could not self-execute (flagged, not faked)
-
-**A real LLM API call.** This sandbox has **no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`**, so I could not
-bill a real model myself. The real path is fully implemented — `src/harnesses/sdk/providers/anthropic.ts`
-and `openai.ts` make real `fetch` calls to the real Messages / Chat Completions endpoints, and the
-harness reads the key from `process.env`. To prove every *other* part of the loop is real without a
-key, the SDK harness's HTTP wire is exercised by a bundled **Anthropic-wire mock**
-(`scripts/mock-llm.ts`) that speaks the exact `/v1/messages` format and scripts a realistic tool loop.
-**Swapping it for the real model is zero code change:** set `ANTHROPIC_API_KEY` (and unset
-`ANTHROPIC_BASE_URL`) and the same harness calls Claude. Everything downstream of the model —
-container, exec, file sync, `npm install`, Vite, the proxied preview — is **100% real and self-verified**
-(`npm run real-e2e` → PASS).
 
 ### Intentionally out of scope (startup ≠ enterprise, per MVP-DEFINITION)
 
@@ -283,9 +201,9 @@ container, exec, file sync, `npm install`, Vite, the proxied preview — is **10
   kernel's fallback ladder (`src/kernel/capabilities.ts`).
 - **Docker preview proxy** = simplest correct thing: local reverse proxy → `http://localhost:<proxyPort>/`
   + raw WS passthrough for HMR. No HTML/URL rewriting (v2).
-- **Additional real adapters** (OpenCode mode-2; managed E2B/Vercel env) are `+1` files each; the seam
-  is proven by the `sdk`/`dummy` harness swap and the `docker`/`dummy` env swap. `opencode` is installed
-  here but also needs a model key; E2B/Vercel need accounts.
+- **Additional real adapters** (OpenCode mode-2; managed E2B/Daytona/CodeSandbox envs) are
+  intentionally adapter-scoped. `opencode` is installed here but also needs a model key; managed
+  cloud environments need their provider accounts and API keys.
 
 ---
 
@@ -297,21 +215,20 @@ src/
   registry/     # register/resolve/list for both seams (module-scoped Map, not a globalThis singleton)
   kernel/       # POLICY ONLY (grep-clean): admission, session, orchestrator, settlement, preview, capabilities
   harnesses/
-    sdk/        # ★ REAL harness (mode 1): agent loop + tools→handle; providers/ = Anthropic + OpenAI clients
-    dummy/, dummy2/   # zero-infra test rung only (CI fixtures), NOT the product
+    openai-agents/   # official OpenAI Agents SDK adapter
+    claude-agent-sdk/# official Claude Agent SDK adapter
+    cli/             # local CLI harnesses
+    opencode/, pi/   # specialized coding/router harnesses
   environments/
     docker/     # ★ REAL env: dockerode + exec/tar file IO + proxy.ts written-once reverse proxy
-    dummy/      # in-memory test rung only
+    e2b/, daytona/, codesandbox/, local/
   server/       # Fastify http.ts (POST /message SSE), sse.ts, bootstrap.ts (loads adapters)
   index.ts      # entrypoint
 scripts/
-  real-e2e.ts          # ★ real harness × real Docker × real preview (auto-uses mock if no key)
-  real-e2e-keepalive.ts# same, holds the preview open for external curl/browser verification
-  mock-llm.ts          # Anthropic-WIRE mock — stands in for ONLY the LLM brain when no key
-  docker-smoke.ts, port-check.ts, demo.ts, grep-gate.mjs
-test/           # registry, provider-select, dummy-x-dummy, docker (self-skipping) — 16 tests
+  docker-smoke.ts, port-check.ts, grep-gate.mjs
+test/           # registry, topology, env loading, docker (self-skipping)
 studio/         # Vite + React + @carbon/react (light "white" theme), two-pane chat+preview
-docs-evidence/  # real-e2e-run.log, live-preview-generated-app.png, studio-sdk-docker-live-preview.png, …
+docs-evidence/  # screenshots, eval reports, and manual verification artifacts
 ```
 
 ## Endpoints

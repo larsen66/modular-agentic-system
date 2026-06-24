@@ -7,8 +7,8 @@
 // native form (Anthropic input_schema / OpenAI parameters / SDK tool()).
 //
 // Why a seam: today write_file/run_command/read_file/expose_port are RE-DEFINED in
-// sdk/index.ts, claude-agent-sdk/tools.ts and openai-agents/execEngine.ts with identical
-// env-routing bodies. That duplication is tools × harnesses. One ToolSpec, many
+// claude-agent-sdk/tools.ts and openai-agents/execEngine.ts share identical
+// env-routing bodies. One ToolSpec, many
 // adapters collapses it.
 
 import type { EnvironmentHandle } from './environment.js';
@@ -61,7 +61,7 @@ export interface ToolKit {
   // Requested refs the harness declared native (HarnessCapabilities.nativeTools/
   // nativeSkills ∩ requested). The harness renders + executes these ITSELF; the
   // kernel did NOT resolve an external spec for them. Empty for pure-consumer
-  // harnesses (e.g. sdk), so they behave exactly as before.
+  // harnesses, so they behave exactly as before.
   readonly nativeToolRefs: string[];
   readonly nativeSkillRefs: string[];
   byRef(ref: string): ToolSpec | undefined;

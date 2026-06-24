@@ -12,7 +12,6 @@ const KEYS = [
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
   'OPENAI_AGENTS_MODEL',
-  'SDK_MODEL',
   'VERCEL_TOKEN',
 ];
 

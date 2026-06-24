@@ -54,10 +54,6 @@ const ORG_SETTINGS_SELECT = 'org_id';
 // /registry so the Studio dropdowns can highlight which counterparts pair with
 // the current selection. Format: 'harnessRef x envRef'.
 export const READY_PAIRS = [
-  'sdk x docker',
-  'sdk x e2b',
-  'sdk x daytona',
-  'sdk x codesandbox',
   'openai-agents x docker',
   'openai-agents x e2b',
   'openai-agents x daytona',
@@ -67,6 +63,10 @@ export const READY_PAIRS = [
   'claude-agent-sdk x daytona',
   'claude-agent-sdk x codesandbox',
   'hermes-cli x local',
+  'hermes-cli x docker',
+  'hermes-cli x e2b',
+  'hermes-cli x daytona',
+  'hermes-cli x codesandbox',
   'claude-cli x local',
   'codex-cli x local',
   'opencode x local',
@@ -85,7 +85,7 @@ function runtimeContext(harnesses: string[], environments: string[]): Architectu
   const openRouter = env('OPENROUTER_API_KEY') || env('OPENROUTER');
   const openAiApiKey = env('OPENAI_API_KEY') || openRouter;
   const baseUrl = env('OPENAI_BASE_URL') || (openRouter ? 'https://openrouter.ai/api/v1' : null);
-  const model = env('OPENAI_AGENTS_MODEL') || env('SDK_MODEL') || (openRouter ? 'openai/gpt-4o-mini' : null);
+  const model = env('OPENAI_AGENTS_MODEL') || (openRouter ? 'openai/gpt-4o-mini' : null);
 
   return {
     harnesses,

@@ -66,7 +66,6 @@ export function applyHarnessEnv(paths?: string[]): void {
     process.env.OPENROUTER_API_KEY = openRouter;
     process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || openRouter;
     process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
-    process.env.SDK_MODEL = process.env.SDK_MODEL || 'openai/gpt-4o-mini';
     process.env.OPENAI_AGENTS_MODEL = process.env.OPENAI_AGENTS_MODEL || 'openai/gpt-4o-mini';
   }
 }

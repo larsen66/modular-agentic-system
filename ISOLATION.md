@@ -76,7 +76,7 @@ cp .env.example .env                # local-stack defaults are pre-filled
 npm run dev
 curl -N -X POST localhost:3000/message \
   -H 'content-type: application/json' \
-  -d '{"harness":"sdk","environment":"local","prompt":"hi",
+  -d '{"harness":"openai-agents","environment":"local","prompt":"hi",
        "projectId":"a1111111-0000-0000-0000-0000000000a1"}'
 # (DEV_NO_AUTH=1 stamps ownerId = Alice; the run persists to Supabase.)
 ```

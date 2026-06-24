@@ -93,8 +93,8 @@ export class Orchestrator {
     // Topology-aware defaults: an agent-in-sandbox harness (OpenCode) brings its
     // OWN complete toolset and never consumes our kit, so it defaults to NO kernel
     // tools/skills — forcing the builder set on it would try to resolve external
-    // specs it neither needs nor (necessarily) has registered. An agent-as-tool
-    // harness (sdk) gets the builder set. A request may always override explicitly.
+    // specs it neither needs nor (necessarily) has registered. Agent-as-tool
+    // harnesses get the builder set. A request may always override explicitly.
     const inSandbox = topologyDecision.topology === 'agent-in-sandbox';
     const toolRefs = args.toolRefs ?? (inSandbox ? [] : DEFAULT_TOOL_REFS);
     const skillRefs = args.skillRefs ?? (inSandbox ? [] : DEFAULT_SKILL_REFS);
