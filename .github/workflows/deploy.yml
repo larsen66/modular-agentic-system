@@ -1,0 +1,41 @@
+name: deploy
+
+# Deploy only after the "ci" workflow finishes successfully on main.
+# Then SSH into the VM, fast-forward ~/dav-kernel-app and restart the pm2 process.
+on:
+  workflow_run:
+    workflows: ["ci"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch: {}
+
+# Never run two deploys at once; cancel an in-flight one if a newer push lands.
+concurrency:
+  group: deploy-dav-kernel
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Gate: only on a green CI run, or a manual dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/dav-kernel-app
+            echo "before: $(git rev-parse --short HEAD)"
+            git fetch --prune origin main
+            git reset --hard origin/main
+            echo "after:  $(git rev-parse --short HEAD)"
+            npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+            pm2 restart dav-kernel --update-env
+            pm2 save
+            echo "deployed: $(git rev-parse --short HEAD)"
