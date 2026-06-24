@@ -32,6 +32,7 @@ import type {
 } from '../../types/index.js';
 import { buildEnvRoutedToolDefinitions } from './envTools.js';
 import { buildDelegateToolDefinition } from './delegateTool.js';
+import { buildRouterPreamble } from './routerPolicy.js';
 
 // ─── Local type aliases for the optional PI SDK ───────────────────────────────
 // These mirror the pi-coding-agent + pi-ai public surfaces we call. Declared
@@ -42,8 +43,17 @@ interface PiModel {
   provider: string;
   id: string;
 }
+interface PiOAuthCredential {
+  type: 'oauth';
+  access: string;
+  refresh: string;
+  expires: number;
+  [key: string]: unknown;
+}
 interface PiAuthStorage {
   setRuntimeApiKey(provider: string, apiKey: string): void;
+  // Runtime OAuth credential (e.g. reuse the ChatGPT/Codex subscription login).
+  set(provider: string, credential: PiOAuthCredential): void;
 }
 interface PiModelRegistry {}
 interface PiSessionManager {}
@@ -100,6 +110,61 @@ function resolveProvider(model: string | undefined): { provider: string; modelId
     return { provider: explicit, modelId: '' };
   }
   return { provider: explicit.slice(0, slash), modelId: explicit.slice(slash + 1) };
+}
+
+// ─── ChatGPT/Codex subscription auth (provider "openai-codex") ────────────────
+//
+// pi-ai ships a first-class `openai-codex` provider (api openai-codex-responses,
+// baseUrl chatgpt.com/backend-api) — the SAME ChatGPT-subscription backend the
+// `codex` CLI uses, NOT the paid OpenAI API. So the PI router can run on the
+// subscription (e.g. `openai-codex/gpt-5.1-codex-max`) with no API key and no
+// OpenRouter token-budget 402. We reuse the existing `codex` login by reading
+// ~/.codex/auth.json and mapping its OAuth tokens into pi's OAuthCredentials
+// shape ({ access, refresh, expires, … }). The `expires` is decoded from the
+// access-token JWT `exp` claim so a still-valid token is used as-is; if decoding
+// fails we set 0, which makes pi refresh via the refresh_token before first use.
+//
+// We seed this in-memory only — we never write back to ~/.codex/auth.json, so a
+// pi-side token refresh cannot clobber the codex CLI's own stored login.
+function decodeJwtExpMs(jwt: string): number {
+  try {
+    const payload = jwt.split('.')[1];
+    if (!payload) return 0;
+    const json = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const exp = JSON.parse(json)?.exp;
+    return typeof exp === 'number' ? exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function loadCodexSubscriptionCredential(): Promise<PiOAuthCredential | undefined> {
+  // Allow an explicit override of the codex auth file; default to ~/.codex/auth.json.
+  const authPath = process.env.CODEX_AUTH_PATH ?? path.join(os.homedir(), '.codex', 'auth.json');
+  let raw: string;
+  try {
+    raw = await fs.readFile(authPath, 'utf8');
+  } catch {
+    return undefined; // no codex login present
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      tokens?: { access_token?: string; refresh_token?: string; id_token?: string; account_id?: string };
+    };
+    const t = parsed.tokens;
+    if (!t?.access_token || !t?.refresh_token) return undefined;
+    return {
+      type: 'oauth',
+      access: t.access_token,
+      refresh: t.refresh_token,
+      expires: decodeJwtExpMs(t.access_token),
+      // Extra fields the openai-codex provider may read (chatgpt-account-id header).
+      ...(t.account_id ? { account_id: t.account_id } : {}),
+      ...(t.id_token ? { id_token: t.id_token } : {}),
+    };
+  } catch {
+    return undefined; // malformed auth.json — fail soft
+  }
 }
 
 // ─── File sync helpers ────────────────────────────────────────────────────────
@@ -253,6 +318,18 @@ class PiHarness implements Harness {
         authStorage.setRuntimeApiKey('openai', process.env.OPENAI_API_KEY);
         log('info', 'auth: OPENAI_API_KEY configured');
       }
+      // ChatGPT/Codex subscription (provider "openai-codex"): reuse the existing
+      // `codex` CLI login so the router can run on the subscription with no API
+      // key. Seeded only when ~/.codex/auth.json is present; harmless otherwise.
+      try {
+        const codexCred = await loadCodexSubscriptionCredential();
+        if (codexCred) {
+          authStorage.set('openai-codex', codexCred);
+          log('info', 'auth: openai-codex (ChatGPT subscription) configured from codex login');
+        }
+      } catch {
+        log('warn', 'auth: failed to load codex subscription login; skipping');
+      }
 
       // ── Model resolution ────────────────────────────────────────────────────
       const modelRef = resolveProvider(task.model);
@@ -264,11 +341,40 @@ class PiHarness implements Harness {
           // We cast provider + modelId as `any` because the generated model table
           // is a large readonly const — we can't statically enumerate all keys
           // at runtime without the generated types, and we want graceful fallback.
-          resolvedModel = (getModel as (p: string, m: string) => ReturnType<typeof getModel> | undefined)(
-            modelRef.provider,
-            modelRef.modelId,
-          );
+          const lookup = getModel as (p: string, m: string) => ReturnType<typeof getModel> | undefined;
+          resolvedModel = lookup(modelRef.provider, modelRef.modelId);
+
+          // openai-codex (ChatGPT subscription) ships new model ids faster than
+          // pi-ai's generated registry. When the requested id is missing but the
+          // provider is openai-codex, synthesize it by cloning an in-registry
+          // sibling (same backend/api/cost shape) with the requested id. This is
+          // what lets `openai-codex/gpt-5.5` resolve while the registry only has
+          // up to gpt-5.4. Verified live: the ChatGPT account serves gpt-5.5/5.4.
+          if (!resolvedModel && modelRef.provider === 'openai-codex') {
+            const tmpl = lookup('openai-codex', 'gpt-5.4') ?? lookup('openai-codex', 'gpt-5.1');
+            if (tmpl) {
+              const siblingId = tmpl.id;
+              resolvedModel = { ...(tmpl as unknown as Record<string, unknown>), id: modelRef.modelId } as unknown as typeof resolvedModel;
+              log('info', `synthesized openai-codex/${modelRef.modelId} from registry sibling ${siblingId}`);
+            }
+          }
+
           if (resolvedModel) {
+            // Optional output-token cap (PI_MAX_TOKENS). A model's default
+            // `maxTokens` (e.g. 65536 for gpt-5.5) is sent verbatim as the
+            // request's max_tokens; on a budget-limited key OpenRouter rejects
+            // it with 402 and pi-ai then streams empty. Routing decisions are
+            // short, so clamping the model's output cap lets expensive models
+            // run within a small per-key budget. No effect when unset.
+            const capRaw = process.env.PI_MAX_TOKENS;
+            const cap = capRaw ? parseInt(capRaw, 10) : NaN;
+            if (Number.isFinite(cap) && cap > 0) {
+              const m = resolvedModel as { maxTokens?: number };
+              if (typeof m.maxTokens === 'number' && m.maxTokens > cap) {
+                log('info', `clamping maxTokens ${m.maxTokens} → ${cap} (PI_MAX_TOKENS)`);
+                m.maxTokens = cap;
+              }
+            }
             log('info', `model: ${resolvedModel.provider}/${resolvedModel.id}`);
           } else {
             log('warn', `model ${modelRef.provider}/${modelRef.modelId} not found in pi-ai registry; letting PI choose`);
@@ -307,22 +413,19 @@ class PiHarness implements Harness {
         : [];
       const customTools = [...envTools, ...(delegateTool ? [delegateTool] : [])];
 
-      // ── Tool allowlist = the STRUCTURAL delegation boundary ────────────────
-      // Router mode (PI is the main agent, can still delegate): PI gets NO
-      // execution surface — only `read` (inspection) + `delegate`. Anything with
-      // side effects (write/edit/run/install/build) is PHYSICALLY only reachable
-      // through delegate, so the "delegate vs do-it-myself" policy is enforced by
-      // the toolset, not by a promptable instruction the model can ignore.
-      //
-      // Leaf mode (depth cap reached, can no longer delegate): PI becomes a
-      // WORKER with the full coding surface — it must do the work itself.
+      // ── Tool allowlist: PI is a GENERALIST that can also escalate ──────────
+      // PI keeps the FULL coding surface (read/write/edit/bash) so it can DO
+      // simple/normal work itself, and gets `delegate` on top so it can hand off
+      // to a better-fit specialized harness. The do-it-myself-vs-delegate line is
+      // a PROMPT CRITERION (see preamble + delegate description), not a structural
+      // gate — PI must be able to act, then choose to escalate only when warranted.
       let toolAllowlist: string[] | undefined;
-      if (canDelegate) {
-        toolAllowlist = ['read', 'delegate']; // orchestrator: inspect + dispatch only
-      } else if (agentAsTool) {
-        toolAllowlist = ['bash', 'read', 'write', 'edit']; // worker: full env-routed surface
+      if (agentAsTool) {
+        toolAllowlist = ['bash', 'read', 'write', 'edit', ...(delegateTool ? ['delegate'] : [])];
+      } else if (delegateTool) {
+        toolAllowlist = ['bash', 'read', 'write', 'edit', 'delegate']; // keep built-ins + escalate
       } else {
-        toolAllowlist = undefined; // agent-in-sandbox leaf: default built-ins
+        toolAllowlist = undefined; // agent-in-sandbox, no delegate: default built-ins
       }
 
       // ── Create AgentSession in the temp workspace ─────────────────────────
@@ -439,19 +542,9 @@ class PiHarness implements Harness {
         // When routing is active, prepend the orchestration policy. The boundary
         // is already enforced structurally (router PI has only read + delegate),
         // so this just tells PI HOW to decide — not a rule it could bypass. The
-        // full harness/env catalog lives in the delegate tool description.
-        const promptText = canDelegate
-          ? `You are the MAIN orchestrating agent. Decide between two actions:\n\n` +
-            `• ANSWER DIRECTLY — for pure reasoning with NO side effects: facts, math, ` +
-            `explanations, plans, analysis. Just reply.\n` +
-            `• DELEGATE — for ANYTHING with side effects: writing files, running or ` +
-            `generating code, installing packages, building/scaffolding apps, executing ` +
-            `untrusted code. Call \`delegate\` with the harness + environment that fit ` +
-            `(use an isolated sandbox env for code execution). You do NOT have write/run ` +
-            `tools yourself — execution happens only through delegate.\n\n` +
-            `Use \`read\` only to inspect before deciding. Then answer or delegate.\n\n` +
-            `User request:\n${task.prompt}`
-          : task.prompt;
+        // full harness/env catalog lives in the delegate tool description. The
+        // policy text itself is the single tunable knob in routerPolicy.ts.
+        const promptText = canDelegate ? buildRouterPreamble(task.prompt) : task.prompt;
         log('info', `prompting PI (model: ${resolvedModel ? `${resolvedModel.provider}/${resolvedModel.id}` : 'auto'})`);
         await session.prompt(promptText);
       } catch (err) {

@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/index.ts",
+    "start:prod": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "docker-smoke": "tsx scripts/docker-smoke.ts",
     "mock-llm": "tsx scripts/mock-llm.ts",
@@ -19,11 +20,15 @@
     "eval:web:manual": "tsx scripts/eval-web-loop.ts --manual",
     "eval:proof": "tsx scripts/eval-proof.ts",
     "eval:router": "tsx scripts/eval-router.ts",
+    "eval:matrix": "tsx scripts/eval-matrix-live.ts",
+    "eval:matrix:dry": "tsx scripts/eval-matrix-live.ts --dry-run",
+    "eval:pi:improve": "tsx scripts/eval-pi-improve.ts",
     "verify:real": "tsx scripts/verify-real.ts",
     "verify:cli": "tsx scripts/verify-cli.ts",
     "test": "vitest run",
     "grep-gate": "node scripts/grep-gate.mjs",
-    "verify": "npm run typecheck && npm run grep-gate && npm run test"
+    "verify": "npm run typecheck && npm run grep-gate && npm run test",
+    "eval:scenarios": "tsx scripts/eval-scenarios.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.186",

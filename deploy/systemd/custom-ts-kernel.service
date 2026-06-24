@@ -1,0 +1,26 @@
+[Unit]
+Description=Custom TS Kernel backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agiens
+Group=agiens
+SupplementaryGroups=docker
+WorkingDirectory=/home/agiens/vbp-german/docs/modular-agentic-system/builds/01-custom-ts-kernel
+Environment=NODE_ENV=production
+Environment=PORT=8090
+Environment=HOST=0.0.0.0
+EnvironmentFile=-/home/agiens/vbp-german/docs/modular-agentic-system/builds/01-custom-ts-kernel/.env
+EnvironmentFile=-/home/agiens/vbp-german/docs/modular-agentic-system/builds/01-custom-ts-kernel/.harness.env
+ExecStart=/usr/bin/npm run start:prod
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

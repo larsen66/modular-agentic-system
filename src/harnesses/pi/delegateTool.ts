@@ -11,29 +11,17 @@
 // at runtime. The structural shape (name/label/description/parameters/execute)
 // matches ToolDefinition in the SDK's dist types.
 
-import type { HarnessEnvCatalog, RunContext, RunIO } from '../../types/index.js';
-
-// Render the live catalog into a description block so the model routes against
-// what ACTUALLY runs (never a hand-maintained list that can drift).
-function renderCatalog(catalog: HarnessEnvCatalog): string {
-  const harnesses = catalog.harnesses
-    .map((h) => `  - harness "${h.ref}" — topologies: [${h.topologies.join(', ')}] (default: ${h.defaultTopology})`)
-    .join('\n');
-  const environments = catalog.environments
-    .map((e) => `  - environment "${e.ref}" — hostsAgentRuntime: ${e.hostsAgentRuntime}`)
-    .join('\n');
-  return [
-    'Dispatch a self-contained sub-task to a specialized sub-agent and wait for its result.',
-    'Pick the harness + environment that best fit the task. Handle trivial asks YOURSELF —',
-    'only delegate heavy or specialized work (builds, sandboxed execution, long agent loops).',
-    '',
-    'Available harnesses:',
-    harnesses || '  (none)',
-    '',
-    'Available environments:',
-    environments || '  (none)',
-  ].join('\n');
-}
+import type { RunContext, RunIO } from '../../types/index.js';
+// All model-facing routing prose lives in routerPolicy.ts — the single tunable
+// knob the accuracy auto-fix loop edits. This file owns only the SDK plumbing.
+import {
+  renderDelegateDescription,
+  HARNESS_PARAM_DESC,
+  ENVIRONMENT_PARAM_DESC,
+  TASK_PARAM_DESC,
+  MODEL_PARAM_DESC,
+  TOPOLOGY_FIELD_DESCRIPTION,
+} from './routerPolicy.js';
 
 // Build the pi ToolDefinition. `defineTool` + `Type` are the dynamically-imported
 // SDK surfaces; `ctx` carries the Delegator; `io` is PI's event sink for nesting.
@@ -47,19 +35,40 @@ export function buildDelegateToolDefinition(
   io: RunIO,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): any {
+  // Constrain harness/environment to the LIVE catalog refs (and topology to the
+  // two real values) as TypeBox enums. The model then physically cannot invent a
+  // ref like "python" — the same structural-enforcement move as the read+delegate
+  // toolset: validity is a property of the schema, not a hope about the prompt.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const enumOf = (refs: string[], desc: string): any => {
+    if (refs.length === 0) return Type.String({ description: desc });
+    if (refs.length === 1) return Type.Literal(refs[0], { description: desc });
+    return Type.Union(refs.map((r) => Type.Literal(r)), { description: desc });
+  };
+  const harnessSchema = enumOf(
+    ctx.catalog.harnesses.map((h) => h.ref),
+    HARNESS_PARAM_DESC,
+  );
+  const environmentSchema = enumOf(
+    ctx.catalog.environments.map((e) => e.ref),
+    ENVIRONMENT_PARAM_DESC,
+  );
+
   return defineTool({
     name: 'delegate',
     label: 'Delegate to sub-agent',
-    description: renderCatalog(ctx.catalog),
+    description: renderDelegateDescription(ctx.catalog),
     promptSnippet: 'delegate — run a sub-task on another harness/environment and return its result.',
     parameters: Type.Object({
-      harness: Type.String({ description: 'Harness ref to run the sub-task (from the catalog).' }),
-      environment: Type.String({ description: 'Environment ref the sub-run executes in (from the catalog).' }),
-      task: Type.String({ description: 'Self-contained instruction for the sub-agent.' }),
+      harness: harnessSchema,
+      environment: environmentSchema,
+      task: Type.String({ description: TASK_PARAM_DESC }),
       topology: Type.Optional(
-        Type.String({ description: "Optional: 'agent-as-tool' | 'agent-in-sandbox'. Omit for the harness default." }),
+        Type.Union([Type.Literal('agent-as-tool'), Type.Literal('agent-in-sandbox')], {
+          description: TOPOLOGY_FIELD_DESCRIPTION,
+        }),
       ),
-      model: Type.Optional(Type.String({ description: 'Optional model override for the sub-run.' })),
+      model: Type.Optional(Type.String({ description: MODEL_PARAM_DESC })),
     }),
     async execute(
       _toolCallId: string,

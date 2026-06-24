@@ -1,0 +1,111 @@
+{
+  "model": "openrouter/openai/gpt-4o-mini",
+  "rate": 1,
+  "passed": 7,
+  "total": 7,
+  "results": [
+    {
+      "id": "router/trivial-fact",
+      "group": "router",
+      "prompt": "What is the capital of France? Answer in one word.",
+      "expect": "self",
+      "got": "self",
+      "pass": true,
+      "delegateTargets": [],
+      "toolCalls": [],
+      "why": "A one-word fact — answer directly.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "router/trivial-math",
+      "group": "router",
+      "prompt": "What is 17 * 23? Just the number.",
+      "expect": "self",
+      "got": "self",
+      "pass": true,
+      "delegateTargets": [],
+      "toolCalls": [
+        "bash"
+      ],
+      "why": "Pure arithmetic — answer inline.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "router/simple-file-write",
+      "group": "router",
+      "prompt": "Create a file notes.txt in the workspace containing the single line: todo: buy milk",
+      "expect": "self",
+      "got": "self",
+      "pass": true,
+      "delegateTargets": [],
+      "toolCalls": [
+        "write"
+      ],
+      "why": "A one-file write — simple side effect, PI does it itself.",
+      "difficulty": "easy"
+    },
+    {
+      "id": "router/simple-code-edit",
+      "group": "router",
+      "prompt": "Write a small JavaScript function reverseString(s) that reverses a string, and save it to utils.js.",
+      "expect": "self",
+      "got": "self",
+      "pass": true,
+      "delegateTargets": [],
+      "toolCalls": [
+        "write"
+      ],
+      "why": "A tiny single-file script — well within PI; no specialized harness needed.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "router/build-full-app",
+      "group": "router",
+      "prompt": "Build a complete React todo app with Vite and Tailwind: multiple components, add/delete/mark-complete, localStorage persistence, clean styling. Scaffold and implement the whole project.",
+      "expect": "delegate",
+      "got": "delegate",
+      "pass": true,
+      "delegateTargets": [
+        "opencode/local"
+      ],
+      "toolCalls": [],
+      "why": "Large multi-file app build — a dedicated coding agent fits better than PI inline.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "router/stateful-dev",
+      "group": "router",
+      "prompt": "Scaffold a Next.js app, start the dev server, and keep iterating on the landing page with live preview — adjust layout and styles until it looks polished. Keep the server running.",
+      "expect": "delegate",
+      "got": "delegate",
+      "pass": true,
+      "delegateTargets": [
+        "opencode/codesandbox/agent-in-sandbox"
+      ],
+      "toolCalls": [],
+      "why": "Long stateful dev with a running server — agent-in-sandbox.",
+      "difficulty": "hard"
+    },
+    {
+      "id": "router/untrusted-exec",
+      "group": "router",
+      "prompt": "A user uploaded an untrusted Python script. Run it safely in an isolated sandbox and report its output.",
+      "expect": "delegate",
+      "got": "delegate",
+      "pass": true,
+      "delegateTargets": [
+        "opencode/docker"
+      ],
+      "toolCalls": [],
+      "why": "Untrusted code — needs sandbox isolation PI cannot give on its own.",
+      "difficulty": "medium"
+    }
+  ],
+  "byGroup": [
+    {
+      "group": "router",
+      "pass": 7,
+      "turns": 7
+    }
+  ]
+}

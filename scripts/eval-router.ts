@@ -18,12 +18,14 @@
 
 import { registry } from '../src/registry/index.js';
 import { Kernel } from '../src/kernel/index.js';
+import { resolveTopology } from '../src/kernel/capabilities.js';
 import { loadOptionalAdapters } from '../src/server/bootstrap.js';
 import type {
   DelegateRequest,
   DelegateResult,
   EngineEvent,
   EnvironmentHandle,
+  ExecutionTopology,
   HarnessEnvCatalog,
   RunContext,
 } from '../src/types/index.js';
@@ -37,7 +39,10 @@ const getArg = (name: string, fallback: string): string => {
 const LOOPS = Math.max(1, parseInt(getArg('loops', '1'), 10));
 const GATE = parseFloat(getArg('gate', '0.8'));
 const TIMEOUT_MS = parseInt(getArg('timeout', '60000'), 10);
-const MODEL = getArg('model', process.env.PI_MODEL ?? 'openrouter/anthropic/claude-sonnet-4.5');
+// Default to gpt-4o-mini: anthropic-via-OpenRouter currently streams empty in
+// pi-ai (provider routing to Bedrock returns no tokens) — an upstream flake, not
+// a router-arch issue. Override with --model / PI_MODEL once that path is healthy.
+const MODEL = getArg('model', process.env.PI_MODEL ?? 'openrouter/openai/gpt-4o-mini');
 
 // ─── Test cases: user prompt → expected routing decision ─────────────────────
 // `delegates` is the hard ground truth (binary, unambiguous). `isolated`/`harness`
@@ -48,15 +53,27 @@ interface Case {
   prompt: string;
   delegates: boolean; // hard gate: should PI delegate at all?
   isolated?: boolean; // soft: when delegating, should the env be an isolated sandbox?
+  // Expected RESOLVED topology for the delegated sub-run. Ground-truth rule:
+  //   agent-as-tool   — bounded / one-shot side-effect work (run a script, build
+  //                     once). Max isolation, agent reasons on control plane.
+  //   agent-in-sandbox— stateful / long-lived dev: running a dev server and
+  //                     iterating with live preview, the agent living in the env.
+  // Soft axis (reported), only checked when the delegate call is otherwise valid.
+  expectTopology?: ExecutionTopology;
   rationale: string;
 }
 
+// Policy under test: PI is a GENERALIST. It does ALL simple/normal work itself
+// (even with side effects — file writes, small scripts, quick commands). It
+// delegates ONLY when a specialized harness fits the task clearly better:
+// large/complex builds, untrusted-code isolation, browser, etc.
 const CASES: Case[] = [
+  // ── SELF: PI handles it directly ──────────────────────────────────────────
   {
     name: 'trivial-fact',
     prompt: 'What is the capital of France? Answer in one word.',
     delegates: false,
-    rationale: 'A one-word fact — PI must answer directly, never delegate.',
+    rationale: 'A one-word fact — answer directly.',
   },
   {
     name: 'trivial-math',
@@ -65,27 +82,44 @@ const CASES: Case[] = [
     rationale: 'Pure arithmetic — answer inline.',
   },
   {
-    name: 'concept-explain',
-    prompt: 'Briefly explain the difference between TCP and UDP.',
+    name: 'simple-file-write',
+    prompt: "Create a file notes.txt in the workspace containing the single line: todo: buy milk",
     delegates: false,
-    rationale: 'Knowledge question — no tools, no sub-agent.',
+    rationale: 'A one-file write — simple side effect, PI does it itself (write/bash).',
   },
   {
-    name: 'build-react-app',
+    name: 'simple-code-edit',
+    prompt: 'Write a small JavaScript function reverseString(s) that reverses a string, and save it to utils.js.',
+    delegates: false,
+    rationale: 'A tiny single-file script — well within PI; no specialized harness needed.',
+  },
+  // ── DELEGATE: a specialized harness fits clearly better ───────────────────
+  {
+    name: 'build-full-app',
     prompt:
-      'Build a React todo app with Vite and Tailwind: add, delete, and mark-complete, ' +
-      'persisted to localStorage. Scaffold the project and implement it.',
+      'Build a complete React todo app with Vite and Tailwind: multiple components, add/delete/' +
+      'mark-complete, localStorage persistence, clean styling. Scaffold and implement the whole project.',
     delegates: true,
     isolated: true,
-    rationale: 'A real build — delegate to a build-capable harness in an isolated env.',
+    rationale: 'Large multi-file app build — a dedicated coding agent fits better than PI doing it inline.',
   },
   {
-    name: 'sandbox-exec',
+    name: 'stateful-dev',
     prompt:
-      'Run a Python script that computes the 100th Fibonacci number and report the exact value.',
+      'Scaffold a Next.js app, start the dev server, and keep iterating on the landing page ' +
+      'with live preview — adjust layout and styles until it looks polished. Keep the server running.',
     delegates: true,
     isolated: true,
-    rationale: 'Untrusted code execution — delegate into a sandbox.',
+    expectTopology: 'agent-in-sandbox',
+    rationale: 'Long stateful dev with a running server — specialized harness, agent-in-sandbox.',
+  },
+  {
+    name: 'untrusted-exec',
+    prompt:
+      'A user uploaded an untrusted Python script. Run it safely in an isolated sandbox and report its output.',
+    delegates: true,
+    isolated: true,
+    rationale: 'Untrusted code — needs sandbox isolation PI cannot give on its own → delegate.',
   },
 ];
 
@@ -192,9 +226,48 @@ async function runCase(prompt: string, runId: string): Promise<Trace> {
   return trace;
 }
 
-// ─── Scoring ──────────────────────────────────────────────────────────────────
+// ─── Delegate analysis: validity + resolved topology (source of truth) ───────
+// Run PI's proposed (harness, env, topology) triple through the REAL machinery:
+// unknown refs throw (→ invalid), and resolveTopology decides whether the
+// topology is runnable on that (harness, env). This is exactly what the kernel
+// does at delegate time, so "valid" here == "would actually run".
+interface DelegateAnalysis {
+  req: DelegateRequest;
+  valid: boolean;
+  resolved?: ExecutionTopology; // the topology the kernel would run
+  reason: string;
+}
+
+function analyzeDelegate(req: DelegateRequest): DelegateAnalysis {
+  let harnessCaps: ReturnType<typeof registry.resolveHarness>['capabilities'] | undefined;
+  let envCaps: ReturnType<typeof registry.resolveEnvironment>['capabilities'] | undefined;
+  try {
+    harnessCaps = registry.resolveHarness(req.harness).capabilities;
+  } catch {
+    return { req, valid: false, reason: `unknown harness "${req.harness}"` };
+  }
+  try {
+    envCaps = registry.resolveEnvironment(req.environment).capabilities;
+  } catch {
+    return { req, valid: false, reason: `unknown environment "${req.environment}"` };
+  }
+  const decision = resolveTopology(harnessCaps, envCaps, req.topology as ExecutionTopology | undefined);
+  if (!decision.ok) return { req, valid: false, reason: decision.message };
+  return { req, valid: true, resolved: decision.topology, reason: 'runnable' };
+}
+
+// ─── Scoring (multi-axis) ─────────────────────────────────────────────────────
+// decision  — DELEGATE vs DIRECT (hard, every case)
+// validity  — every delegate call is a runnable (harness, env, topology) triple
+//             (hard, only when the case delegates)
+// topology  — the resolved topology matches the case's expectTopology
+//             (soft/reported, only when expectTopology is set AND the call is valid)
+// Overall case pass = AND of the applicable axes.
 interface Verdict {
   pass: boolean;
+  decision: boolean;
+  validity?: boolean;
+  topology?: boolean;
   notes: string[];
 }
 
@@ -202,28 +275,72 @@ function score(c: Case, t: Trace): Verdict {
   const notes: string[] = [];
   const didDelegate = t.delegateCalls.length > 0;
 
-  let pass = didDelegate === c.delegates;
+  const decision = didDelegate === c.delegates;
   notes.push(
-    `decision: ${didDelegate ? 'DELEGATE' : 'DIRECT'} (expected ${c.delegates ? 'DELEGATE' : 'DIRECT'}) ${pass ? '✅' : '❌'}`,
+    `decision: ${didDelegate ? 'DELEGATE' : 'DIRECT'} (expected ${c.delegates ? 'DELEGATE' : 'DIRECT'}) ${decision ? '✅' : '❌'}`,
   );
 
+  let validity: boolean | undefined;
+  let topology: boolean | undefined;
+
   if (c.delegates && didDelegate) {
-    for (const d of t.delegateCalls) {
-      const iso = isolatedEnvs.has(d.environment);
-      notes.push(`  → ${d.harness} / ${d.environment}${c.isolated ? (iso ? ' [isolated ✅]' : ' [NOT isolated ⚠️]') : ''}`);
+    const analyses = t.delegateCalls.map(analyzeDelegate);
+    // Dedup the printed lines (a runaway can repeat the same triple many times).
+    const seen = new Set<string>();
+    for (const a of analyses) {
+      const key = `${a.req.harness}/${a.req.environment}/${a.req.topology ?? 'auto'}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const iso = isolatedEnvs.has(a.req.environment);
+      const isoTag = c.isolated ? (iso ? ' [isolated ✅]' : ' [NOT isolated ⚠️]') : '';
+      const topTag = a.valid ? `→ ${a.resolved}` : `INVALID: ${a.reason}`;
+      notes.push(`  ${a.req.harness} / ${a.req.environment} ${topTag}${isoTag}`);
+    }
+    if (t.delegateCalls.length > seen.size) {
+      notes.push(`  (…${t.delegateCalls.length} delegate calls total, ${seen.size} distinct — runaway width ⚠️)`);
+    }
+
+    // Validity axis: ALL calls must be runnable.
+    validity = analyses.every((a) => a.valid);
+    notes.push(`  validity: ${validity ? 'all runnable ✅' : 'has unrunnable triple ❌'}`);
+
+    // Topology axis: among valid calls, does the resolved topology match expectation?
+    if (c.expectTopology) {
+      const validResolved = analyses.filter((a) => a.valid).map((a) => a.resolved);
+      const match = validResolved.length > 0 && validResolved.every((r) => r === c.expectTopology);
+      topology = match;
+      notes.push(
+        `  topology: resolved [${[...new Set(validResolved)].join(', ') || 'none'}] vs expected ${c.expectTopology} ${match ? '✅' : '❌'}`,
+      );
     }
   }
-  if (!c.delegates && !didDelegate && !(t.thinking.trim() || t.finalText.trim())) {
-    pass = false;
-    notes.push('  expected a direct answer but PI produced no text ❌');
+
+  if (!c.delegates && !didDelegate) {
+    // Self case: PI must actually handle it — either answer (text) or act with its
+    // own tools (write/edit/bash). Delegating here is already a decision-axis fail.
+    const didSomething = Boolean(t.thinking.trim() || t.finalText.trim() || t.toolCalls.length > 0);
+    if (!didSomething) {
+      notes.push('  expected PI to handle it directly but it did nothing ❌');
+      return { pass: false, decision: false, notes };
+    }
+    const how = t.toolCalls.length > 0 ? `[${[...new Set(t.toolCalls.map((x) => x.name))].join(', ')}]` : 'answered';
+    notes.push(`  handled directly: ${how} ✅`);
   }
-  return { pass, notes };
+
+  const pass = decision && (validity ?? true) && (topology ?? true);
+  return { pass, decision, validity, topology, notes };
 }
 
 // ─── Run the matrix (cases × loops) ──────────────────────────────────────────
 let total = 0;
 let passed = 0;
 const perCase = new Map<string, { pass: number; runs: number }>();
+// Per-axis tallies (denominator = how many runs the axis applied to).
+const axis = {
+  decision: { pass: 0, n: 0 },
+  validity: { pass: 0, n: 0 },
+  topology: { pass: 0, n: 0 },
+};
 
 for (let loop = 0; loop < LOOPS; loop++) {
   if (LOOPS > 1) console.log(`\n────────── loop ${loop + 1}/${LOOPS} ──────────`);
@@ -247,6 +364,18 @@ for (let loop = 0; loop < LOOPS; loop++) {
     if (v.pass) agg.pass++;
     perCase.set(c.name, agg);
 
+    // Axis tallies (only count an axis on runs where it applied).
+    axis.decision.n++;
+    if (v.decision) axis.decision.pass++;
+    if (v.validity !== undefined) {
+      axis.validity.n++;
+      if (v.validity) axis.validity.pass++;
+    }
+    if (v.topology !== undefined) {
+      axis.topology.n++;
+      if (v.topology) axis.topology.pass++;
+    }
+
     console.log(`\n[${c.name}] ${v.pass ? 'PASS' : 'FAIL'}  — ${c.rationale}`);
     console.log(`  prompt:   "${c.prompt.slice(0, 90)}${c.prompt.length > 90 ? '…' : ''}"`);
     const think = (trace.thinking.trim() || trace.finalText.trim()).replace(/\s+/g, ' ');
@@ -264,6 +393,12 @@ console.log(`\n=== Summary ===`);
 for (const [name, agg] of perCase) {
   console.log(`  ${name.padEnd(20)} ${agg.pass}/${agg.runs}`);
 }
+const pct = (a: { pass: number; n: number }): string =>
+  a.n === 0 ? 'n/a' : `${a.pass}/${a.n} = ${((a.pass / a.n) * 100).toFixed(0)}%`;
+console.log(`\n--- axes ---`);
+console.log(`  decision (delegate vs direct):  ${pct(axis.decision)}`);
+console.log(`  validity (runnable triple):     ${pct(axis.validity)}`);
+console.log(`  topology (as-tool vs in-sandbox): ${pct(axis.topology)}`);
 console.log(`\noverall: ${passed}/${total} = ${(rate * 100).toFixed(1)}%   gate: ${(GATE * 100).toFixed(0)}%`);
 
 if (rate >= GATE) {

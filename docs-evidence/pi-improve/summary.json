@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-06-23T15:38:45.761Z",
+  "piModel": "openrouter/openai/gpt-4o-mini",
+  "fixerModel": "openrouter/anthropic/claude-sonnet-4.5",
+  "gate": 0.9,
+  "baselineRate": 1,
+  "bestRate": 1,
+  "bestIter": 0,
+  "policyChanged": false,
+  "history": [
+    {
+      "iter": 0,
+      "rate": 1,
+      "kept": true,
+      "note": "baseline"
+    }
+  ]
+}
