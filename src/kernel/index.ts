@@ -11,11 +11,13 @@ import {
   resolveEnvironment,
   resolveHarness,
 } from '../registry/index.js';
-import type { Delegator, EngineEvent, ExecutionTopology, RunContext } from '../types/index.js';
+import type { Delegator, EngineEvent, EnvLogger, ExecutionTopology, RunContext } from '../types/index.js';
 import { Admission } from './admission.js';
 import { SessionManager, type SessionConfig } from './session.js';
+import { PrewarmPool, type PrewarmRequest, type PrewarmStatus } from './prewarmPool.js';
 import { Orchestrator } from './orchestrator.js';
-import { PreviewRegistry } from './preview.js';
+import { PreviewRegistry, type PreviewState } from './preview.js';
+import { previewSnapshotStore, type ResolvedFile } from './previewSnapshot.js';
 import type { RunResult } from './settlement.js';
 
 export type { SessionConfig } from './session.js';
@@ -33,7 +35,10 @@ const MAX_DELEGATION_DEPTH = 2;
 
 export class Kernel {
   private readonly admission = new Admission();
-  private readonly sessions = new SessionManager();
+  // Project-open warm pool — declared BEFORE sessions so the field initializer
+  // can hand it to the SessionManager (class fields init in declaration order).
+  private readonly prewarm = new PrewarmPool();
+  private readonly sessions = new SessionManager(this.prewarm);
   private readonly preview = new PreviewRegistry();
   private readonly orchestrator = new Orchestrator({ preview: this.preview });
   // parentSessionId → ( `${harness}::${env}` → childSessionId ). Child workspaces
@@ -81,7 +86,58 @@ export class Kernel {
   // preview registry (no live owner to check against).
   getPreviewUrl(sessionId: string, ownerId?: string): string | null {
     if (ownerId) this.sessions.get(sessionId, ownerId); // throws on cross-owner
-    return this.preview.get(sessionId)?.url ?? null;
+    return this.preview.get(sessionId)?.url || null;
+  }
+
+  // Full preview state (live url + durable snapshot pointer). Owner-scoped the
+  // same way getPreviewUrl is: while the session is live, a cross-owner read
+  // throws SessionOwnershipError; once the session is gone we fall back to the
+  // registry (no live owner to check). The transport turns the snapshotId into a
+  // same-origin static URL — the kernel never builds URLs.
+  getPreview(sessionId: string, ownerId?: string): PreviewState | null {
+    if (ownerId) this.sessions.get(sessionId, ownerId); // throws on cross-owner
+    return this.preview.get(sessionId) ?? null;
+  }
+
+  // Resolve one file inside the session's durable snapshot to an on-disk path
+  // the transport can stream. Owner-scoped; returns null when there is no
+  // snapshot or the file is absent (404 either way — no existence leak).
+  readPreviewFile(sessionId: string, ownerId: string | undefined, relPath: string): ResolvedFile | null {
+    if (ownerId) this.sessions.get(sessionId, ownerId); // throws on cross-owner
+    const snapshotId = this.preview.get(sessionId)?.snapshotId;
+    if (!snapshotId) return null;
+    return previewSnapshotStore().resolve(snapshotId, relPath);
+  }
+
+  // Pre-provision (warm) a session's workspace ahead of the first message, so the
+  // cold sandbox cost (e2b cold start = seconds) is paid while the user is still
+  // typing, not on send. Idempotent: ensureWorkspace reuses an existing handle for
+  // the same (sessionId, env), so the subsequent runMessage finds it warm. `logger`
+  // streams the substrate lifecycle to the caller (optional). Best-effort — a warm
+  // failure must NOT block; the run path re-provisions and surfaces errors there.
+  async warmSession(config: SessionConfig, logger?: EnvLogger): Promise<void> {
+    await this.sessions.ensureWorkspace(config, logger);
+  }
+
+  // Project-OPEN warm pool: keep N sandboxes ready (full git clone of the project)
+  // BEFORE any chat exists, so opening a chat adopts one instantly via
+  // SessionManager.ensureWorkspace. Unlike warmSession (keyed to one sessionId),
+  // this is keyed to the project — a chat created later under any new sessionId
+  // claims it as long as (owner, env, runtimeProfile, projectId) match. Returns
+  // immediately; provisioning happens in the background. `target` overrides the
+  // pool size (env PREWARM_POOL_SIZE) for this project.
+  prewarmProject(req: PrewarmRequest, target?: number, logger?: EnvLogger): PrewarmStatus {
+    return this.prewarm.ensure(req, target, logger);
+  }
+
+  // Snapshot of the warm pool (per-key ready/provisioning counts) for /healthz.
+  prewarmStats(): PrewarmStatus[] {
+    return this.prewarm.stats();
+  }
+
+  // Tear down every warm handle (process shutdown).
+  async destroyPrewarmPool(): Promise<void> {
+    await this.prewarm.destroyAll();
   }
 
   // Build the delegation context handed to a MAIN/router harness (pi). The
@@ -217,8 +273,13 @@ export class Kernel {
           topology: config.topology,
           toolRefs: config.toolRefs,
           skillRefs: config.skillRefs,
-          // The entry agent (depth 0) is the router: hand it the delegation seam.
-          ctx: this.buildRunContext(config.sessionId, config.ownerId, 0),
+          // The entry agent (depth 0) is the router: hand it the delegation seam —
+          // UNLESS delegation is explicitly disabled (the lean build path), where
+          // pi runs as a pure builder with no Delegator (no delegate tool/preamble).
+          ctx:
+            config.delegation === false
+              ? undefined
+              : this.buildRunContext(config.sessionId, config.ownerId, 0),
           handle,
           signal: controller.signal,
           emit: sink,

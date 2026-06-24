@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #0f172a;
+        --bg2: #0b1120;
+        --line: #1e293b;
+        --line2: #334155;
+        --fg: #e2e8f0;
+        --muted: #64748b;
+        --dim: #475569;
+        --accent: #a78bfa;
+        --ok: #34d399;
+        --user: #38bdf8;
+        --run: #34d399;
+        --kernel: #a78bfa;
+        --net: #fb923c;
+        --err: #f87171;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #app { display: flex; flex-direction: column; height: 100vh; }
+      .bar {
+        display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+        padding: 5px 8px; border-bottom: 1px solid var(--line);
+      }
+      .title { color: var(--accent); font-weight: 700; font-size: 12px; margin-right: auto; }
+      .count { color: var(--dim); font-weight: 400; }
+      button, select {
+        background: #1e293b; color: var(--fg); border: 1px solid var(--line2);
+        border-radius: 6px; padding: 3px 8px; font: inherit; cursor: pointer;
+      }
+      button:hover { background: #243049; }
+      button.on { color: var(--ok); border-color: #2f6f57; }
+      .chip { text-transform: uppercase; letter-spacing: .04em; font-size: 10px; opacity: .45; }
+      .chip.on { opacity: 1; }
+      .chip[data-src="user"].on { color: var(--user); border-color: var(--user); }
+      .chip[data-src="run"].on { color: var(--run); border-color: var(--run); }
+      .chip[data-src="kernel"].on { color: var(--kernel); border-color: var(--kernel); }
+      .chip[data-src="net"].on { color: var(--net); border-color: var(--net); }
+      label.inline { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+      #filter {
+        flex: 1; min-width: 120px; margin: 0; padding: 4px 8px; background: var(--bg2); color: var(--fg);
+        border: 1px solid var(--line2); border-radius: 6px; font: inherit; outline: none;
+      }
+      #list { flex: 1; overflow-y: auto; }
+      .empty, .disconnected { padding: 16px; font-size: 12px; }
+      .empty { color: var(--dim); }
+      .disconnected { color: var(--err); }
+      .row { border-bottom: 1px solid var(--line); }
+      .row.err .head { background: rgba(248,113,113,.06); }
+      .head {
+        display: grid; grid-template-columns: 42px 92px 48px 150px 1fr; gap: 8px;
+        width: 100%; text-align: left; background: transparent; border: none;
+        color: var(--fg); padding: 3px 8px; cursor: pointer; align-items: baseline;
+      }
+      .head:hover { background: #131d33; }
+      .seq { color: var(--dim); }
+      .time { color: var(--muted); }
+      .src { font-size: 10px; text-transform: uppercase; font-weight: 700; }
+      .src.user { color: var(--user); }
+      .src.run { color: var(--run); }
+      .src.kernel { color: var(--kernel); }
+      .src.net { color: var(--net); }
+      .event { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .event.err { color: var(--err); }
+      .summary { color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .rid { color: var(--dim); cursor: pointer; }
+      .rid:hover { color: var(--accent); text-decoration: underline; }
+      pre {
+        margin: 0; padding: 6px 8px 10px 50px; background: var(--bg2); color: #cbd5e1;
+        font-size: 11px; overflow-x: auto; white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="bar">
+        <span class="title">⌁ Agent stream <span class="count" id="count">(0)</span></span>
+        <button class="chip on" data-src="user">user</button>
+        <button class="chip on" data-src="run">run</button>
+        <button class="chip on" data-src="kernel">kernel</button>
+        <button class="chip on" data-src="net">net</button>
+        <button id="errors">errors only</button>
+        <label class="inline">sort
+          <select id="sort">
+            <option value="seq-asc">chronological</option>
+            <option value="seq-desc">newest first</option>
+            <option value="source">by source</option>
+            <option value="event">by event</option>
+          </select>
+        </label>
+      </div>
+      <div class="bar">
+        <input id="filter" placeholder="filter by event / payload / runId…" />
+        <button id="pause">❚❚ pause</button>
+        <button id="autoscroll" class="on">↓ auto</button>
+        <button id="export">export</button>
+        <button id="clear">clear</button>
+      </div>
+      <div id="list"><div class="empty">Waiting for the page… open a chat and send a message.</div></div>
+    </div>
+    <script src="panel.js"></script>
+  </body>
+</html>

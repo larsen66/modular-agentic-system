@@ -42,6 +42,35 @@ export function buildRouterPreamble(userPrompt: string): string {
   );
 }
 
+// ─── Block A2: the build + live-preview directive ─────────────────────────────
+// Prepended to the user prompt in agent-as-tool runs (router AND leaf). PI's bash
+// runs INSIDE the env, so anything it serves there can be exposed via the
+// expose_port tool. Without this, PI writes a static file and stops — no server,
+// no preview_ready, blank iframe. This teaches the serve→expose finish.
+export function buildPreviewDirective(): string {
+  return (
+    `LIVE PREVIEW — the user watches your result in an iframe, so every app/page you ` +
+    `build MUST end as a running, exposed server:\n` +
+    `  1. Build the app in the workspace. For anything web-facing, make the entry ` +
+    `\`index.html\` (a static page) or a real dev app.\n` +
+    `  2. Start a server IN THE BACKGROUND, bound to 0.0.0.0 (not localhost), on a port ` +
+    `(default 5173). The command MUST end with \`&\` so the bash call returns — e.g. for a ` +
+    `static page: \`python3 -m http.server 5173 --bind 0.0.0.0 >/tmp/serve.log 2>&1 &\`. ` +
+    `Never run the server in the foreground; it would block forever.\n` +
+    `  3. Call \`expose_port\` with that port to get the public preview URL. ` +
+    `expose_port WAITS for the server to accept connections — do NOT poll the port ` +
+    `yourself (no nc / curl / node checks) and do NOT run extra mkdir/ls steps. Write ` +
+    `the file, start the server, expose.\n` +
+    `  4. DURABILITY (do this so the preview survives the sandbox being torn down): ` +
+    `produce a static production build with a RELATIVE asset base — for Vite run ` +
+    `\`npx vite build --base ./\` (output \`dist/\`) — then call \`snapshot_preview\` ` +
+    `with that dir. This freezes a durable copy that still renders when the user ` +
+    `reopens the chat later. (If you skip it, the system attempts an automatic ` +
+    `snapshot, but doing it explicitly is more reliable.)\n` +
+    `Do not declare the task done until expose_port has returned a URL.\n\n`
+  );
+}
+
 // ─── Block B: per-harness purpose hints ──────────────────────────────────────
 // One line per harness ref describing what it is GOOD FOR — guidance for the
 // model's choice. Topologies come from the LIVE catalog (can't drift); these
@@ -52,9 +81,6 @@ export const HARNESS_PURPOSE: Record<string, string> = {
   'claude-agent-sdk':
     'Claude-based agent (strong reasoning + tools) — research, multi-step analysis, careful edits',
   'openai-agents': 'OpenAI Agents loop — general agentic tasks with tools',
-  'codex-cli': 'Codex CLI coding agent — code generation/build via local login',
-  'claude-cli': 'Claude CLI coding agent — code work via local login',
-  'hermes-cli': 'Hermes CLI agent — code work via local login',
   pi: 'the orchestrator itself — do NOT delegate here (you ARE pi)',
 };
 

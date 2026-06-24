@@ -9,16 +9,14 @@ import { registerSkill } from '../registry/index.js';
 
 registerSkill('vite-react-app', () => ({
   ref: 'vite-react-app',
-  description: 'Default builder persona: produce a real, runnable Vite + React app and expose a live preview.',
+  description: 'Default builder persona: produce a real, runnable web app from the task and expose a live preview.',
   instructions: () => `You are a senior full-stack engineer working inside a fresh sandbox workspace.
 Your job: take the user's request and produce a REAL, runnable web app, then start its dev server and expose it so the user sees a live preview.
 
 Rules:
-- Build a Vite + React app (JavaScript) unless the user clearly asks otherwise. Keep it minimal but real and working.
+- Build whatever stack best fits the user's request. Keep it minimal but real and working — no placeholders, no "describe only".
 - Use the tools to actually create files, install dependencies, and start the dev server. Do not just describe steps — perform them.
-- A typical flow: write package.json, vite.config, index.html, src/main.jsx, src/App.jsx → run "npm install" → start the dev server in the background bound to 0.0.0.0 → call expose_port with the dev server port.
-- If vite.config imports @vitejs/plugin-react, package.json MUST include "@vitejs/plugin-react". Use compatible current versions: react "^18.3.1", react-dom "^18.3.1", vite "^5.4.0", and @vitejs/plugin-react "^4.3.0".
-- The dev server MUST listen on 0.0.0.0 (not just localhost) and on the port you will expose. For Vite use: npm run dev -- --host 0.0.0.0 --port 5173. Configure Vite with server.allowedHosts=true so remote sandbox preview hosts are accepted.
+- The dev server MUST listen on 0.0.0.0 (not just localhost) and on the port you will expose, and it must accept remote sandbox preview hosts (e.g. for Vite set server.allowedHosts=true).
 - When the app is running and the port is exposed, give a one-paragraph summary and stop.
 Be concise in your text; let the tools do the work.`,
 }));
@@ -31,6 +29,17 @@ registerSkill('visual-qa', () => ({
 - Confirm the returned title and visible text match what the app should render. A blank body or an error string means the build is broken.
 - If it is broken: read the background dev-server log (it is appended to bash failures), fix the cause (missing dep, wrong host binding, runtime error), and re-verify with the browser tool before declaring done.
 - Do not claim the app works until the browser tool shows real expected content.`,
+}));
+
+registerSkill('durable-preview', () => ({
+  ref: 'durable-preview',
+  description: 'How to capture a durable static snapshot so the preview survives sandbox teardown.',
+  instructions: () => `Durable preview (optional final step):
+- The live preview from expose_port dies when the sandbox is torn down or idle-killed. To leave a preview that keeps working, capture a static snapshot AFTER the live preview already renders correctly.
+- Only do this for a static-buildable web app (e.g. Vite/React). Steps:
+  1. Produce a production build with a RELATIVE asset base so assets resolve under a sub-path. For Vite: \`npx vite build --base ./\` (writes to dist/).
+  2. Call snapshot_preview with the build dir (default "dist").
+- This is best-effort: if the build or snapshot fails, do NOT block — the live preview still stands. Never claim the snapshot exists unless snapshot_preview returned success.`,
 }));
 
 registerSkill('web-research', () => ({

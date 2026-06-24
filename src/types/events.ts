@@ -14,6 +14,13 @@ export type EngineEvent =
   | { type: 'child_settled'; childRunId: string; cause: TerminalCause }
   | { type: 'usage_delta'; inputTokens: number; outputTokens: number }
   | { type: 'preview_ready'; url: string; port: number }
+  // A DURABLE static snapshot of the built app was captured into the kernel's
+  // preview-snapshot store. Unlike `preview_ready` (a live proxy URL that dies
+  // with the sandbox), the snapshot is served by the kernel itself and survives
+  // sandbox teardown/idle-death — the cheap read-only preview path. The payload
+  // is metadata only (the bytes live on the kernel's disk, keyed by snapshotId);
+  // the orchestrator pump records the session→snapshot mapping in the registry.
+  | { type: 'preview_snapshot_ready'; snapshotId: string; fileCount: number; bytes: number }
   | { type: 'final_text'; text: string }
   // Diagnostic side-channel for the Activity Log: kernel run lifecycle + env
   // substrate lifecycle (provision/exec/file-sync/exposePort/destroy). Purely

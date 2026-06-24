@@ -1,8 +1,7 @@
 // src/harnesses/cli/detect.ts
-// Presence-only auth detection for the CLI-credential harnesses. The whole point
-// of these harnesses is to reuse the user's EXISTING local `hermes`, `claude`,
-// or `codex`
-// logins WITHOUT any API key and WITHOUT ever touching a credential value.
+// Presence-only auth detection. Used by the claude-agent-sdk harness to tell
+// whether the user has an existing local `claude` login (a Claude subscription),
+// WITHOUT any API key and WITHOUT ever touching a credential value.
 //
 // SECURITY (hard rule): we NEVER read, print, log, or return any token / auth
 // file content. We check only PRESENCE — does the binary exist, and does an auth
@@ -46,56 +45,4 @@ export function detectClaude(): CliStatus {
     loggedIn = true;
   }
   return { installed, loggedIn };
-}
-
-// Codex: login lives in ~/.codex/auth.json (ChatGPT OAuth tokens OR a stored
-// key). We check ONLY that the file exists — we never open or parse its contents.
-export function detectCodex(): CliStatus {
-  const installed = which('codex');
-  if (!installed) return { installed: false, loggedIn: false };
-  const loggedIn = existsSync(join(homedir(), '.codex', 'auth.json'));
-  return { installed, loggedIn };
-}
-
-// Hermes Agent: auth and user-managed secrets live under HERMES_HOME (default
-// ~/.hermes). Prefer the CLI's own status probe when available; fall back to
-// presence-only checks for auth/config files. We never read file contents.
-export function detectHermes(): CliStatus {
-  const installed = which('hermes');
-  if (!installed) return { installed: false, loggedIn: false };
-  const hermesHome = process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes');
-  let loggedIn = false;
-  try {
-    const r = spawnSync('hermes', ['auth', 'status'], { encoding: 'utf8', timeout: 8000 });
-    if (r.status === 0) {
-      const out = `${r.stdout}\n${r.stderr}`.toLowerCase();
-      loggedIn = /\b(logged in|authenticated|configured|available|active|ok)\b/.test(out);
-    }
-  } catch {
-    /* fall through to presence heuristic */
-  }
-  if (
-    !loggedIn &&
-    (existsSync(join(hermesHome, 'auth.json')) || existsSync(join(hermesHome, '.env')))
-  ) {
-    loggedIn = true;
-  }
-  return { installed, loggedIn };
-}
-
-// A harness is "ready" when its CLI is installed AND a login is present. This is
-// what makes a CLI harness the zero-key default.
-export function claudeCliReady(): boolean {
-  const s = detectClaude();
-  return s.installed && s.loggedIn;
-}
-
-export function codexCliReady(): boolean {
-  const s = detectCodex();
-  return s.installed && s.loggedIn;
-}
-
-export function hermesCliReady(): boolean {
-  const s = detectHermes();
-  return s.installed && s.loggedIn;
 }

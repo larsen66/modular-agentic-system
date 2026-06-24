@@ -8,16 +8,9 @@
 // orchestrator can resolve its default kit.
 import '../tools/index.js';
 import '../skills/index.js';
-// The LOCAL environment (host temp dir + child_process). Required by the
-// CLI-credential harnesses, which write into a real host cwd.
+// The LOCAL environment (host temp dir + child_process). A real host cwd for
+// harnesses that run the agent loop on the host rather than in a sandbox.
 import '../environments/local/index.js';
-// The CLI-credential harnesses (mode 2): drive the user's existing local
-// `hermes`/`claude`/`codex` logins headless — REAL generation with ZERO API keys. They
-// self-register on import; they only spawn the binary at run() time, so importing
-// is safe even when the CLI is absent or logged out.
-import '../harnesses/cli/hermes.js';
-import '../harnesses/cli/claude.js';
-import '../harnesses/cli/codex.js';
 // PI is the DEFAULT main agent (composition-root profile). Loaded EAGERLY (not in
 // the optional set) so a load failure surfaces loudly at startup rather than as a
 // confusing per-run UnknownRefError. Safe to import: the pi-coding-agent SDK is

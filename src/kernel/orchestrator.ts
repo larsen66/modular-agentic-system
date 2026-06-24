@@ -21,8 +21,8 @@ import { PreviewRegistry } from './preview.js';
 // The default capability set for a run that does not name its own. The builder
 // persona: full file/shell/preview surface + web + browser, framed by the
 // vite-react-app and visual-qa skills. A caller can override per RunArgs.
-const DEFAULT_TOOL_REFS = ['read', 'write', 'edit', 'bash', 'expose_port', 'webfetch', 'websearch', 'browser'];
-const DEFAULT_SKILL_REFS = ['vite-react-app', 'visual-qa'];
+const DEFAULT_TOOL_REFS = ['read', 'write', 'edit', 'bash', 'expose_port', 'snapshot_preview', 'webfetch', 'websearch', 'browser'];
+const DEFAULT_SKILL_REFS = ['vite-react-app', 'visual-qa', 'durable-preview'];
 
 export interface OrchestratorDeps {
   preview: PreviewRegistry;
@@ -63,6 +63,11 @@ export class Orchestrator {
       emit: (ev: EngineEvent) => {
         if (ev.type === 'preview_ready') {
           this.deps.preview.set(args.sessionId, { url: ev.url, port: ev.port });
+        }
+        // The durable static snapshot was written to the snapshot store by the
+        // tool; the pump is the single writer that maps it onto this session.
+        if (ev.type === 'preview_snapshot_ready') {
+          this.deps.preview.setSnapshot(args.sessionId, ev.snapshotId);
         }
         settlement.observe(ev);
         args.emit(ev);

@@ -20,9 +20,9 @@ jobs:
         run: npm run grep-gate
       - name: Unit + integration tests (Docker tests self-skip without a daemon)
         run: npm test
-      - name: Install (studio)
-        working-directory: studio
+      - name: Install (apps/next — island frontend)
+        working-directory: apps/next
         run: npm ci || npm install
-      - name: Build Studio (Carbon light-theme UI)
-        working-directory: studio
+      - name: Build apps/next (island — the deployed frontend)
+        working-directory: apps/next
         run: npm run build

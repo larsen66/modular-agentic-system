@@ -100,6 +100,7 @@ describe('canonical tool + skill registration (self-register on import)', () => 
     expect(kit.tools).toHaveLength(8);
     const preamble = await kit.systemPreamble();
     expect(preamble).toContain('senior full-stack engineer'); // vite-react-app
+    expect(preamble).toContain('best fits the user'); // vite-react-app builds from the task, no forced stack
     expect(preamble).toContain('Visual QA'); // visual-qa
   });
 });

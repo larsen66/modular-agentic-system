@@ -129,6 +129,10 @@ async function runCell(t: Triple, loop: number, authHeader: string | null): Prom
         prompt: PROMPT,
         ports: [5173],
         source: { kind: 'files', files: [] },
+        // Optional project attribution: when set, the server runs the FULL
+        // prod-shaped Supabase persistence path (runs/run_events + RLS history)
+        // instead of the projectless JSONL fallback, so historyListed is real.
+        ...(process.env.EVAL_PROJECT_ID ? { projectId: process.env.EVAL_PROJECT_ID } : {}),
       }),
     });
     if (res.status === 401 || res.status === 403) {

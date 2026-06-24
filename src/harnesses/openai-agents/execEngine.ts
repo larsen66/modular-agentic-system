@@ -92,9 +92,10 @@ function normalizeGeneratedFile(filePath: string, content: string): string {
     if (!normalized.includes('@vitejs/plugin-react') && !normalized.includes('vite')) return normalized;
     return `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
     allowedHosts: true
@@ -117,15 +118,34 @@ export default defineConfig({
     const hasVite = 'vite' in deps || 'vite' in devDeps || '@vitejs/plugin-react' in devDeps;
     if (!hasReact && !hasVite) return normalized;
 
-    deps.react = '^18.3.1';
-    deps['react-dom'] = '^18.3.1';
-    delete devDeps.react;
-    delete devDeps['react-dom'];
-    devDeps.vite = '^5.4.0';
-    devDeps['@vitejs/plugin-react'] = '^4.3.0';
+    // Pin the React/Vite toolchain the model chose to compatible versions
+    // (install-success guardrail). Do NOT impose a UI/styling stack: only pin
+    // packages the model actually declared, so the app is built from the task
+    // rather than forced into HeroUI/Tailwind.
+    if (hasReact) {
+      deps.react = '^19.0.0';
+      deps['react-dom'] = '^19.0.0';
+      delete devDeps.react;
+      delete devDeps['react-dom'];
+    }
+    if (hasVite) {
+      devDeps.vite = '^5.4.0';
+      devDeps['@vitejs/plugin-react'] = '^4.3.0';
+    }
+    if ('@heroui/react' in deps || '@heroui/react' in devDeps) deps['@heroui/react'] = '^3.2.1';
+    if (
+      'tailwindcss' in deps ||
+      'tailwindcss' in devDeps ||
+      '@tailwindcss/vite' in deps ||
+      '@tailwindcss/vite' in devDeps
+    ) {
+      deps.tailwindcss = '^4.0.0';
+      delete devDeps.tailwindcss;
+      devDeps['@tailwindcss/vite'] = '^4.0.0';
+    }
     pkg.dependencies = deps;
     pkg.devDependencies = devDeps;
-    pkg.scripts = { dev: 'vite', ...(pkg.scripts ?? {}) };
+    if (hasVite) pkg.scripts = { dev: 'vite', ...(pkg.scripts ?? {}) };
     return `${JSON.stringify(pkg, null, 2)}\n`;
   } catch {
     return normalized;
@@ -134,6 +154,57 @@ export default defineConfig({
 
 function looksLikeLogPath(output: string): boolean {
   return /^\/tmp\/devproc-\d+\.log$/.test(output.trim());
+}
+
+function isInstallCommand(cmd: string): boolean {
+  return /(^|\s)(npm|pnpm|yarn)\s+(install|i)(\s|$)/.test(cmd);
+}
+
+function isDevServerCommand(cmd: string): boolean {
+  return /(^|\s)(npm|pnpm|yarn)\s+run\s+dev(\s|$)/.test(cmd) || /(^|\s)vite(\s|$)/.test(cmd);
+}
+
+function isForegroundOnlyCommand(cmd: string): boolean {
+  return (
+    isInstallCommand(cmd) ||
+    /(^|\s)(npm|pnpm|yarn)\s+run\s+(build|test|lint|typecheck)(\s|$)/.test(cmd)
+  );
+}
+
+async function missingFiles(env: EnvironmentHandle, paths: string[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const path of paths) {
+    if (!(await env.readFile(path))) missing.push(path);
+  }
+  return missing;
+}
+
+async function validateRunCommand(cmd: string, background: boolean, env: EnvironmentHandle): Promise<string | null> {
+  if (background && isForegroundOnlyCommand(cmd)) {
+    return `Do not run "${cmd}" in background. Write the app files first, then run dependency/build commands in the foreground with background:false.`;
+  }
+
+  if (isInstallCommand(cmd)) {
+    const missing = await missingFiles(env, ['package.json']);
+    if (missing.length) return `Cannot run "${cmd}" before package.json exists. Write package.json first.`;
+  }
+
+  if (isDevServerCommand(cmd)) {
+    const missing = await missingFiles(env, [
+      'package.json',
+      'vite.config.js',
+      'index.html',
+      'src/main.jsx',
+      'src/App.jsx',
+      'package-lock.json',
+    ]);
+    if (missing.length) {
+      return `Cannot start the dev server yet. Missing: ${missing.join(', ')}. Write the app files and run npm install in the foreground first.`;
+    }
+    if (!background) return `Run the dev server with background:true so the tool call can return and expose_port can run.`;
+  }
+
+  return null;
 }
 
 async function appendBackgroundLog(env: EnvironmentHandle, message: string): Promise<string> {
@@ -189,6 +260,11 @@ async function executeToolNow(
       const cmd = String(args.cmd ?? '');
       const background = Boolean(args.background);
       io.emit({ type: 'tool_call', name, args: { cmd, background }, callId });
+      const validationError = await validateRunCommand(cmd, background, env);
+      if (validationError) {
+        io.emit({ type: 'tool_result', ok: false, output: validationError.slice(0, 800), callId });
+        return validationError;
+      }
       const r = await env.exec(cmd, { detached: background, timeoutMs: 240_000 });
       if (isProcessHandle(r)) {
         io.emit({ type: 'tool_result', ok: true, output: `[started] ${cmd}`, callId });
@@ -239,10 +315,8 @@ export const SYSTEM_INSTRUCTIONS = `You are a senior full-stack engineer working
 Your job: take the user's request and produce a REAL, runnable web app, then start its dev server and expose it so the user sees a live preview.
 
 Rules:
-- Build a Vite + React app (JavaScript) unless the user clearly asks otherwise. Keep it minimal but real and working.
+- Build whatever stack best fits the user's request. Keep it minimal but real and working — no placeholders, no "describe only".
 - Use the tools to actually create files, install dependencies, and start the dev server. Do not just describe steps — perform them.
-- A typical flow: write package.json, vite.config, index.html, src/main.jsx, src/App.jsx → run "npm install" → start the dev server in the background bound to 0.0.0.0 → call expose_port with the dev server port.
-- If vite.config imports @vitejs/plugin-react, package.json MUST include "@vitejs/plugin-react". Use compatible current versions: react "^18.3.1", react-dom "^18.3.1", vite "^5.4.0", and @vitejs/plugin-react "^4.3.0".
-- The dev server MUST listen on 0.0.0.0 (not just localhost) and on the port you will expose. For Vite use: npm run dev -- --host 0.0.0.0 --port 5173. Configure Vite with server.allowedHosts=true so remote sandbox preview hosts are accepted.
+- The dev server MUST listen on 0.0.0.0 (not just localhost) and on the port you will expose, and it must accept remote sandbox preview hosts (e.g. for Vite set server.allowedHosts=true).
 - When the app is running and the port is exposed, give a one-paragraph summary and stop.
 Be concise in your text; let the tools do the work.`;

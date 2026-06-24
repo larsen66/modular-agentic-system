@@ -4,6 +4,7 @@
 // on first run. The handle is a black box — the kernel never inspects its id.
 
 import { resolveEnvironment } from '../registry/index.js';
+import type { PrewarmPool } from './prewarmPool.js';
 import type {
   EnvironmentHandle,
   EnvLogger,
@@ -25,6 +26,10 @@ export interface SessionConfig {
   runId?: string;
   source?: ProvisionSpec['source'];
   runtimeProfile?: string;
+  // Project this session's workspace belongs to. Threaded from the transport so a
+  // fresh session can ADOPT a project-open pre-warmed sandbox (the warm pool keys
+  // on projectId). Not used by provisioning otherwise.
+  projectId?: string;
   model?: string;
   // Per-run execution-topology request (agent-as-tool ↔ agent-in-sandbox toggle).
   // Forwarded to the orchestrator, which resolves it against the (harness, env)
@@ -37,11 +42,18 @@ export interface SessionConfig {
   // resolved per run, not cached on the session.
   toolRefs?: string[];
   skillRefs?: string[];
+  // Router toggle for a MAIN harness (pi). `false` → the kernel does NOT hand the
+  // run a Delegator, so pi runs as a pure builder (no `delegate` tool, no router
+  // preamble) — leaner + faster for the straight prompt→build→preview path.
+  // Omitted/true → router on (pi can escalate to other harnesses). Leaf harnesses
+  // ignore this either way.
+  delegation?: boolean;
 }
 
 interface SessionState {
   handle: EnvironmentHandle;
   environmentRef: string;
+  runtimeProfile?: string;
   ownerId?: string;
 }
 
@@ -57,6 +69,10 @@ export class SessionOwnershipError extends Error {
 export class SessionManager {
   private sessions = new Map<string, SessionState>();
 
+  // Optional project-open warm pool. When set, a NEW session's first provision
+  // tries to adopt a ready warm handle before paying a cold start.
+  constructor(private readonly pool?: PrewarmPool) {}
+
   // Provision (or reuse) the workspace handle for a session. Awaits readiness
   // inside the adapter's provision() — no fixed kernel-side timeout, so a 150ms
   // and a 2-min cold start share one code path. `logger` (optional) is forwarded
@@ -64,7 +80,7 @@ export class SessionManager {
   async ensureWorkspace(config: SessionConfig, logger?: EnvLogger): Promise<EnvironmentHandle> {
     const existing = this.sessions.get(config.sessionId);
     if (existing) assertOwner(existing, config.ownerId);
-    if (existing && existing.environmentRef === config.environment) {
+    if (existing && existing.environmentRef === config.environment && existing.runtimeProfile === config.runtimeProfile) {
       logger?.('info', `reusing existing ${config.environment} workspace for session`);
       return existing.handle;
     }
@@ -74,7 +90,6 @@ export class SessionManager {
       this.sessions.delete(config.sessionId);
     }
 
-    const environment = resolveEnvironment(config.environment);
     const spec: ProvisionSpec = {
       source: config.source ?? { kind: 'files', files: [] },
       runtimeProfile: config.runtimeProfile,
@@ -82,10 +97,23 @@ export class SessionManager {
       ports: config.ports,
       logger,
     };
-    const handle = await environment.provision(spec);
+
+    // Adopt a project-open pre-warmed sandbox if one matches this session's
+    // (owner, env, runtimeProfile, project) identity — the cold start was already
+    // paid at project-open. On a pool miss, provision fresh exactly as before.
+    const claimed = this.pool?.claim({
+      ownerId: config.ownerId,
+      environment: config.environment,
+      runtimeProfile: config.runtimeProfile,
+      projectId: config.projectId,
+      source: spec.source,
+    });
+    if (claimed) logger?.('info', 'adopted pre-warmed sandbox (instant workspace)');
+    const handle = claimed ?? (await resolveEnvironment(config.environment).provision(spec));
     this.sessions.set(config.sessionId, {
       handle,
       environmentRef: config.environment,
+      runtimeProfile: config.runtimeProfile,
       ownerId: config.ownerId,
     });
     return handle;

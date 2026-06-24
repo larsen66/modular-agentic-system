@@ -1,0 +1,6 @@
+# Static asset subtrees served directly before the SPA fallback.
+/assets/*    /assets/:splat    200
+/internal/*  /internal/:splat  200
+
+# SPA fallback — all other navigations resolve to the React entrypoint.
+/*           /index.html       200

@@ -17,7 +17,7 @@ import fastifyStatic from '@fastify/static';
 import { Kernel } from '../kernel/index.js';
 import { SessionOwnershipError } from '../kernel/session.js';
 import { serializeEvent } from './sse.js';
-import type { EngineEvent, ExecutionTopology } from '../types/index.js';
+import type { EngineEvent, ExecutionTopology, ProvisionSource } from '../types/index.js';
 // JSONL run-history persistence — the FALLBACK used only when Supabase is not
 // configured. The 1:1-prod path persists to Supabase (runStore/historyRead).
 import { RunRecorder, listRunMetadata, getRun } from './runHistory.js';
@@ -66,38 +66,48 @@ export interface MessageBody {
   // the orchestrator applies its default builder set.
   toolRefs?: string[];
   skillRefs?: string[];
+  // Router toggle for pi. Omitted on the default build path → router OFF (lean
+  // builder, fastest prompt→preview). Set true to force the router/delegate seam.
+  delegation?: boolean;
 }
 
-function sandboxEnvFor(harness: string): Record<string, string> | undefined {
-  if (harness !== 'hermes-cli') return undefined;
-  const allowed = [
-    'OPENROUTER_API_KEY',
-    'OPENROUTER',
-    'HERMES_CLI_MODEL',
-    'HERMES_INFERENCE_MODEL',
-    'OPENAI_AGENTS_MODEL',
-  ];
-  const env: Record<string, string> = {};
-  for (const key of allowed) {
-    const value = process.env[key];
-    if (value?.trim()) env[key] = value;
-  }
-  return Object.keys(env).length ? env : undefined;
+// Pre-provision request: warm the session's sandbox on chat open so the cold
+// start is paid while the user types, not on send. Only provision-relevant fields
+// (no prompt/model/topology — those are run-time).
+export interface WarmBody {
+  sessionId?: string;
+  harness?: string;
+  environment?: string;
+  runtimeProfile?: string;
+  source?: MessageBody['source'];
+  ports?: number[];
 }
 
-function runtimeProfileFor(harness: string, environment: string, requested?: string): string | undefined {
-  if (requested) return requested;
-  if (harness === 'hermes-cli' && environment === 'docker') {
-    return process.env.HERMES_DOCKER_IMAGE || 'modular-runner-hermes:local';
-  }
-  return undefined;
+// Project-OPEN pre-provision request: warm a small pool of sandboxes for a project
+// BEFORE any chat exists, so opening a chat adopts one instantly. Unlike WarmBody
+// (one named session), this is keyed to projectId, and `source` allows git so the
+// warmed sandbox already has the project repo cloned.
+export interface PrewarmBody {
+  projectId?: string;
+  harness?: string;
+  environment?: string;
+  runtimeProfile?: string;
+  // Full ProvisionSource (incl. git) — the warm sandbox is git-cloned at open.
+  source?: ProvisionSource;
+  ports?: number[];
+  // Desired warm pool size for this project (default env PREWARM_POOL_SIZE).
+  count?: number;
+}
+
+function runtimeProfileFor(_harness: string, _environment: string, requested?: string): string | undefined {
+  return requested;
 }
 
 // API route prefixes. Used by the SPA fallback so genuine API 404s stay JSON
 // instead of being shadowed by index.html. Keep in sync with the routes below.
 const API_PREFIXES = [
   '/health', '/healthz', '/registry', '/architecture', '/auth',
-  '/projects', '/preview', '/history', '/memory', '/message',
+  '/projects', '/preview', '/history', '/memory', '/message', '/warm', '/prewarm',
 ];
 
 export function buildServer(kernel: Kernel) {
@@ -137,6 +147,7 @@ export function buildServer(kernel: Kernel) {
       ok: true,
       harnesses: kernel.listHarnesses(),
       environments: kernel.listEnvironments(),
+      prewarm: kernel.prewarmStats(),
     };
   });
 
@@ -199,18 +210,55 @@ export function buildServer(kernel: Kernel) {
     return { projects: await listProjectsForUser(jwt) };
   });
 
-  // Owner-scoped preview lookup. getPreviewUrl throws SessionOwnershipError if
-  // the live session belongs to another user → 404 (no existence leak).
+  // Owner-scoped preview lookup. getPreview throws SessionOwnershipError if the
+  // live session belongs to another user → 404 (no existence leak). Returns the
+  // ephemeral live `url` AND, when a durable snapshot exists, a same-origin
+  // `static` URL the kernel serves even after the sandbox is gone.
   app.get<{ Params: { sessionId: string } }>(
     '/preview/:sessionId',
     { preHandler: authPreHandler },
     async (req, reply) => {
       try {
-        return { url: kernel.getPreviewUrl(req.params.sessionId, req.auth!.ownerId) };
+        const state = kernel.getPreview(req.params.sessionId, req.auth!.ownerId);
+        const origin = `${req.protocol}://${req.headers.host}`;
+        return {
+          url: state?.url || null,
+          // Trailing slash matters: the served index.html uses RELATIVE asset
+          // URLs (built with `--base ./`), which resolve against this directory.
+          static: state?.snapshotId ? `${origin}/preview/${req.params.sessionId}/app/` : null,
+        };
       } catch (err) {
         if (err instanceof SessionOwnershipError) {
           reply.code(404);
           return { error: 'session not found' };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // Serve a file from the session's DURABLE static snapshot. This is the cheap
+  // read-only preview path: no live sandbox required. Owner-scoped; a missing
+  // snapshot/file or a cross-owner session both 404 (no existence leak).
+  app.get<{ Params: { sessionId: string; '*': string } }>(
+    '/preview/:sessionId/app/*',
+    { preHandler: authPreHandler },
+    async (req, reply) => {
+      try {
+        const file = kernel.readPreviewFile(req.params.sessionId, req.auth!.ownerId, req.params['*'] ?? '');
+        if (!file) {
+          reply.code(404);
+          return { error: 'not found' };
+        }
+        reply.header('content-type', file.contentType);
+        // Content-addressed: a given snapshotId's bytes never change, so the
+        // file is safe to cache hard for the session's lifetime.
+        reply.header('cache-control', 'public, max-age=3600');
+        return reply.send(fs.createReadStream(file.absPath));
+      } catch (err) {
+        if (err instanceof SessionOwnershipError) {
+          reply.code(404);
+          return { error: 'not found' };
         }
         throw err;
       }
@@ -267,6 +315,82 @@ export function buildServer(kernel: Kernel) {
     async (req) => ({ memory: await getSessionMemory(req.auth!.ownerId, req.params.sessionId) })
   );
 
+  // Warm a session's sandbox ahead of the first message (chat-open pre-provision).
+  // Idempotent + best-effort: returns warmed:false (not an error status) on failure
+  // so the client never blocks; the /message path re-provisions and surfaces errors.
+  app.post<{ Body: WarmBody }>('/warm', { preHandler: authPreHandler }, async (req, reply) => {
+    const body = req.body ?? {};
+    const ownerId = req.auth!.ownerId;
+    const sessionId = body.sessionId ?? `${ownerId.slice(0, 8)}-${randomUUID()}`;
+
+    // Mirror /message's harness/env defaulting so the warmed (env, runtimeProfile)
+    // matches what the run will request — else ensureWorkspace won't reuse it.
+    const explicitHarness = Boolean(body.harness);
+    const hasModelKey = Boolean(
+      process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY
+    );
+    const usePiDefault = !explicitHarness && hasModelKey;
+    const credFallback = !explicitHarness && !hasModelKey ? recommendDefaults() : null;
+    const harness = body.harness ?? (usePiDefault ? PI_MAIN_PROFILE.harness : credFallback!.harness);
+    const environment =
+      body.environment ?? (usePiDefault ? PI_MAIN_PROFILE.environment : credFallback!.environment);
+
+    try {
+      await kernel.warmSession({
+        sessionId,
+        ownerId,
+        harness,
+        environment,
+        runtimeProfile: runtimeProfileFor(harness, environment, body.runtimeProfile),
+        source: body.source ?? { kind: 'files', files: [] },
+        ports: body.ports,
+      });
+      return reply.send({ warmed: true, sessionId, harness, environment });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.send({ warmed: false, sessionId, harness, environment, error: message });
+    }
+  });
+
+  // Project-OPEN pre-warm: keep N sandboxes ready for a project before any chat
+  // exists, so opening a chat adopts one instantly. Returns immediately (warming
+  // happens in the background); best-effort, so it never blocks project open.
+  app.post<{ Body: PrewarmBody }>('/prewarm', { preHandler: authPreHandler }, async (req, reply) => {
+    const body = req.body ?? {};
+    const ownerId = req.auth!.ownerId;
+
+    // Mirror /warm + /message harness/env defaulting so the warmed (env,
+    // runtimeProfile) matches what the chat run will request — else the warm
+    // handle is never adopted.
+    const explicitHarness = Boolean(body.harness);
+    const hasModelKey = Boolean(
+      process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY
+    );
+    const usePiDefault = !explicitHarness && hasModelKey;
+    const credFallback = !explicitHarness && !hasModelKey ? recommendDefaults() : null;
+    const harness = body.harness ?? (usePiDefault ? PI_MAIN_PROFILE.harness : credFallback!.harness);
+    const environment =
+      body.environment ?? (usePiDefault ? PI_MAIN_PROFILE.environment : credFallback!.environment);
+
+    try {
+      const status = kernel.prewarmProject(
+        {
+          ownerId,
+          projectId: body.projectId,
+          environment,
+          runtimeProfile: runtimeProfileFor(harness, environment, body.runtimeProfile),
+          ports: body.ports,
+          source: body.source,
+        },
+        body.count
+      );
+      return reply.send({ prewarming: true, projectId: body.projectId ?? null, harness, environment, ...status });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.send({ prewarming: false, projectId: body.projectId ?? null, error: message });
+    }
+  });
+
   app.post<{ Body: MessageBody }>('/message', { preHandler: authPreHandler }, async (req, reply) => {
     const body = req.body;
     const ownerId = req.auth!.ownerId;
@@ -301,11 +425,22 @@ export function buildServer(kernel: Kernel) {
     const model = body.model ?? (usePiDefault ? PI_MAIN_PROFILE.model : undefined);
     const toolRefs = body.toolRefs ?? (usePiDefault ? PI_MAIN_PROFILE.toolRefs : undefined);
     const skillRefs = body.skillRefs ?? (usePiDefault ? PI_MAIN_PROFILE.skillRefs : undefined);
+    // Transport default: router OFF (lean builder, fastest prompt→preview). The
+    // Studio always sends an explicit harness, so gating on usePiDefault never
+    // fired — router stayed on. Make delegation OPT-IN over HTTP: set
+    // delegation:true to enable the pi router/delegate seam. Programmatic kernel
+    // callers (eval harness) drive harness.run directly with their own ctx and are
+    // unaffected by this transport default.
+    const delegation = body.delegation ?? false;
 
     // 1:1-prod persistence is active only when Supabase is configured AND the
     // run is attributed to a project (the runs FK requires project_id). Else we
     // degrade to the JSONL recorder so the build still streams without Supabase.
-    const useSupabase = supabaseConfigured() && Boolean(body.projectId);
+    // KERNEL_RUNS_PERSIST gate (default OFF): writing runs/run_events to the BOS-prod
+    // project is held behind an explicit flag until the prod schema is verified
+    // compatible with createRun() — never write to the live DB blind.
+    const useSupabase =
+      supabaseConfigured() && Boolean(body.projectId) && process.env.KERNEL_RUNS_PERSIST === '1';
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -363,16 +498,19 @@ export function buildServer(kernel: Kernel) {
         sessionId,
         runId,
         ownerId,
+        // Threaded so a fresh chat session can adopt a project-open pre-warmed
+        // sandbox (the warm pool keys on projectId).
+        projectId: body.projectId,
         harness,
         environment,
         source: body.source ?? { kind: 'files', files: [] },
         runtimeProfile: runtimeProfileFor(harness, environment, body.runtimeProfile),
-        env: sandboxEnvFor(harness),
         model,
         topology: body.topology,
         ports: body.ports,
         toolRefs,
         skillRefs,
+        delegation,
       },
       promptForRun,
       sink

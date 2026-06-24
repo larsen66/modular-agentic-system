@@ -11,6 +11,7 @@
 // plane, proving the seam carries non-env tools too.
 
 import { registerTool } from '../registry/index.js';
+import { previewSnapshotStore } from '../kernel/previewSnapshot.js';
 import type { EnvironmentHandle, RunIO, ToolResult } from '../types/index.js';
 import { isProcessHandle } from '../types/index.js';
 
@@ -31,6 +32,57 @@ function serialize<T>(env: EnvironmentHandle, fn: () => Promise<T>): Promise<T> 
 
 function looksLikeLogPath(output: string): boolean {
   return /^\/tmp\/devproc-\d+\.log$/.test(output.trim());
+}
+
+function isInstallCommand(cmd: string): boolean {
+  return /(^|\s)(npm|pnpm|yarn)\s+(install|i)(\s|$)/.test(cmd);
+}
+
+function isDevServerCommand(cmd: string): boolean {
+  return /(^|\s)(npm|pnpm|yarn)\s+run\s+dev(\s|$)/.test(cmd) || /(^|\s)vite(\s|$)/.test(cmd);
+}
+
+function isForegroundOnlyCommand(cmd: string): boolean {
+  return (
+    isInstallCommand(cmd) ||
+    /(^|\s)(npm|pnpm|yarn)\s+run\s+(build|test|lint|typecheck)(\s|$)/.test(cmd)
+  );
+}
+
+async function missingFiles(env: EnvironmentHandle, paths: string[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const path of paths) {
+    if (!(await env.readFile(path))) missing.push(path);
+  }
+  return missing;
+}
+
+async function validateBashCommand(cmd: string, background: boolean, env: EnvironmentHandle): Promise<string | null> {
+  if (background && isForegroundOnlyCommand(cmd)) {
+    return `Do not run "${cmd}" in background. Write the app files first, then run dependency/build commands in the foreground with background:false.`;
+  }
+
+  if (isInstallCommand(cmd)) {
+    const missing = await missingFiles(env, ['package.json']);
+    if (missing.length) return `Cannot run "${cmd}" before package.json exists. Write package.json first.`;
+  }
+
+  if (isDevServerCommand(cmd)) {
+    const missing = await missingFiles(env, [
+      'package.json',
+      'vite.config.js',
+      'index.html',
+      'src/main.jsx',
+      'src/App.jsx',
+      'package-lock.json',
+    ]);
+    if (missing.length) {
+      return `Cannot start the dev server yet. Missing: ${missing.join(', ')}. Write the app files and run npm install in the foreground first.`;
+    }
+    if (!background) return `Run the dev server with background:true so the tool call can return and expose_port can run.`;
+  }
+
+  return null;
 }
 
 async function appendBackgroundLog(env: EnvironmentHandle, message: string): Promise<string> {
@@ -55,9 +107,10 @@ function normalizeGeneratedFile(filePath: string, content: string): string {
     if (!normalized.includes('@vitejs/plugin-react') && !normalized.includes('vite')) return normalized;
     return `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
     allowedHosts: true
@@ -77,15 +130,34 @@ export default defineConfig({
     const hasReact = 'react' in deps || 'react-dom' in deps || 'react' in devDeps || 'react-dom' in devDeps;
     const hasVite = 'vite' in deps || 'vite' in devDeps || '@vitejs/plugin-react' in devDeps;
     if (!hasReact && !hasVite) return normalized;
-    deps.react = '^18.3.1';
-    deps['react-dom'] = '^18.3.1';
-    delete devDeps.react;
-    delete devDeps['react-dom'];
-    devDeps.vite = '^5.4.0';
-    devDeps['@vitejs/plugin-react'] = '^4.3.0';
+    // Pin the React/Vite toolchain the model chose to compatible versions
+    // (install-success guardrail). Do NOT impose a UI/styling stack: only pin
+    // packages the model actually declared, so the app is built from the task
+    // rather than forced into HeroUI/Tailwind.
+    if (hasReact) {
+      deps.react = '^19.0.0';
+      deps['react-dom'] = '^19.0.0';
+      delete devDeps.react;
+      delete devDeps['react-dom'];
+    }
+    if (hasVite) {
+      devDeps.vite = '^5.4.0';
+      devDeps['@vitejs/plugin-react'] = '^4.3.0';
+    }
+    if ('@heroui/react' in deps || '@heroui/react' in devDeps) deps['@heroui/react'] = '^3.2.1';
+    if (
+      'tailwindcss' in deps ||
+      'tailwindcss' in devDeps ||
+      '@tailwindcss/vite' in deps ||
+      '@tailwindcss/vite' in devDeps
+    ) {
+      deps.tailwindcss = '^4.0.0';
+      delete devDeps.tailwindcss;
+      devDeps['@tailwindcss/vite'] = '^4.0.0';
+    }
     pkg.dependencies = deps;
     pkg.devDependencies = devDeps;
-    pkg.scripts = { dev: 'vite', ...(pkg.scripts ?? {}) };
+    if (hasVite) pkg.scripts = { dev: 'vite', ...(pkg.scripts ?? {}) };
     return `${JSON.stringify(pkg, null, 2)}\n`;
   } catch {
     return normalized;
@@ -186,6 +258,8 @@ registerTool('bash', () => ({
     serialize(env, async () => {
       const cmd = String(input.cmd ?? '');
       const background = Boolean(input.background);
+      const validationError = await validateBashCommand(cmd, background, env);
+      if (validationError) return fail(validationError);
       const r = await env.exec(cmd, { detached: background, timeoutMs: 240_000 });
       if (isProcessHandle(r)) return ok(`started in background: ${cmd}`);
       if (background && r.exitCode === 0 && looksLikeLogPath(r.stdout)) {
@@ -219,6 +293,64 @@ registerTool('expose_port', () => ({
       const { url } = await env.exposePort(port);
       io.emit({ type: 'preview_ready', url, port }); // semantic event owned by the tool
       return ok(`Preview URL: ${url}`);
+    }),
+}));
+
+// ── durable preview snapshot ──────────────────────────────────────────────────
+// Capture the app's STATIC build output into the kernel's content-addressed
+// snapshot store, so the read-only preview survives the sandbox being torn down
+// or idle-killed (the cheap counterpart to expose_port's live proxy URL). The
+// agent tars the build dir INSIDE its opaque env; we read the tarball back via
+// the contract's readFile (binary-safe — exec stdout would corrupt bytes) and
+// hand it to the store. The store write + the lightweight preview_snapshot_ready
+// event keep file bytes OUT of the SSE/persistence stream.
+
+registerTool('snapshot_preview', () => ({
+  ref: 'snapshot_preview',
+  description:
+    'Capture the STATIC build output of your app into a DURABLE preview that keeps working even after the sandbox is gone. ' +
+    'Call this AFTER producing a production build of static files (e.g. `npm run build` → `dist/`). ' +
+    'IMPORTANT: build with a RELATIVE asset base so assets resolve under the preview sub-path — for Vite run `npx vite build --base ./`. ' +
+    'Pass the directory that contains the built index.html (default "dist"). This is an optional durability step — do it after the live preview already works.',
+  needsEnv: true,
+  parameters: {
+    type: 'object',
+    properties: {
+      dir: { type: 'string', description: 'Directory of built static files containing index.html. Default "dist".' },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+  execute: (input, env, io: RunIO) =>
+    serialize(env, async () => {
+      const dir = (String(input.dir ?? 'dist').trim() || 'dist').replace(/\/+$/, '');
+      const idx = await env.readFile(`${dir}/index.html`);
+      if (!idx) {
+        return fail(
+          `No ${dir}/index.html found. Produce a static build first (e.g. \`npx vite build --base ./\`) so ` +
+            `${dir}/index.html exists, then call snapshot_preview again.`
+        );
+      }
+      const archive = '/tmp/__kernel_snapshot.tgz';
+      const r = await env.exec(`tar czf ${archive} -C ${JSON.stringify(dir)} .`, { timeoutMs: 120_000 });
+      if (isProcessHandle(r)) return fail('snapshot failed: tar unexpectedly ran in background');
+      if (r.exitCode !== 0) {
+        return fail(`snapshot failed: tar exited ${r.exitCode}: ${(r.stderr || r.stdout).slice(-800)}`);
+      }
+      const tgz = await env.readFile(archive);
+      if (!tgz) return fail(`snapshot failed: could not read archive at ${archive}`);
+      try {
+        const meta = await previewSnapshotStore().ingestTarball(tgz);
+        // Metadata-only event — the bytes are already on the kernel's disk. The
+        // orchestrator pump maps snapshotId onto this session (single writer).
+        io.emit({ type: 'preview_snapshot_ready', snapshotId: meta.snapshotId, fileCount: meta.fileCount, bytes: meta.bytes });
+        return ok(
+          `Durable preview snapshot stored: ${meta.fileCount} files, ${meta.bytes} bytes. ` +
+            `It is served as the preview even after this sandbox is gone.`
+        );
+      } catch (err) {
+        return fail(`snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }),
 }));
 

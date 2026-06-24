@@ -1,0 +1,74 @@
+{
+  "generatedAt": "2026-06-24T15:46:31.382Z",
+  "baseUrl": "http://127.0.0.1:3100",
+  "authMode": "none(dev-no-auth?)",
+  "loops": 1,
+  "compatibleTriples": [
+    "pi:e2b:agent-as-tool",
+    "pi:e2b:agent-in-sandbox"
+  ],
+  "totals": {
+    "attempted": 2,
+    "passed": 0,
+    "failed": 2,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "harness": "pi",
+      "environment": "e2b",
+      "topology": "agent-as-tool",
+      "status": "FAIL",
+      "loop": 0,
+      "sessionId": "livemx-pi-e2b-agent-as-tool-0-1782315309998",
+      "durationMs": 349015,
+      "eventCounts": {
+        "log": 369,
+        "run_started": 1,
+        "stream_chunk": 213,
+        "usage_delta": 3,
+        "tool_call": 32,
+        "tool_result": 32,
+        "final_text": 1,
+        "terminal": 1,
+        "settled": 1
+      },
+      "runId": "9eca47ff-6424-4b8c-85c4-f20e76785206",
+      "settledCause": "done",
+      "inputTokens": 7905,
+      "outputTokens": 542,
+      "cost": 0.031845,
+      "historyListed": false,
+      "historyDetailOk": false,
+      "reason": "settled=done preview=none looksLikeApp=false historyListed=false historyDetail=false"
+    },
+    {
+      "harness": "pi",
+      "environment": "e2b",
+      "topology": "agent-in-sandbox",
+      "status": "FAIL",
+      "loop": 0,
+      "sessionId": "livemx-pi-e2b-agent-in-sandbox-0-1782315659021",
+      "durationMs": 332359,
+      "eventCounts": {
+        "log": 367,
+        "run_started": 1,
+        "stream_chunk": 167,
+        "usage_delta": 6,
+        "tool_call": 26,
+        "tool_result": 26,
+        "final_text": 1,
+        "terminal": 1,
+        "settled": 1
+      },
+      "runId": "8be94ff8-b20c-4af6-bc58-4de6edcb6549",
+      "settledCause": "done",
+      "inputTokens": 9004,
+      "outputTokens": 762,
+      "cost": 0.038442,
+      "historyListed": false,
+      "historyDetailOk": false,
+      "reason": "settled=done preview=none looksLikeApp=false historyListed=false historyDetail=false"
+    }
+  ]
+}

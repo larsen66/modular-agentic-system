@@ -22,7 +22,6 @@
     "eval:matrix": "tsx scripts/eval-matrix-live.ts",
     "eval:matrix:dry": "tsx scripts/eval-matrix-live.ts --dry-run",
     "eval:pi:improve": "tsx scripts/eval-pi-improve.ts",
-    "verify:cli": "tsx scripts/verify-cli.ts",
     "test": "vitest run",
     "grep-gate": "node scripts/grep-gate.mjs",
     "verify": "npm run typecheck && npm run grep-gate && npm run test",

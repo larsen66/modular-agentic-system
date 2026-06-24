@@ -1,0 +1,170 @@
+/* Island styling entry — per HeroUI v3 quick-start (see hero-ui-skill: getting-started/quick-start):
+   import tailwindcss FIRST, then @heroui/styles. Import order matters. Fresh HeroUI defaults; no
+   legacy token bridge (spec 001, R5). */
+@import "tailwindcss";
+@import "@heroui/styles";
+@import "tw-animate-css";
+
+@plugin "@tailwindcss/typography";
+
+/* Dedicated surface-card radius TOKEN (generates the `rounded-surface` utility). The stock scale
+   can't go past ~8px here: `--radius-lg`/`md` are Tailwind defaults (8/6px) while `--radius-xl`+ are
+   HeroUI's, proportional to the tiny global `--radius` (so they squash). This is the one knob for the
+   inset surface cards (e.g. the preview panel) — dial the single value to re-round them all. */
+@theme {
+  --radius-surface: 0.5rem; /* 8px */
+}
+
+/* Streamdown renders the markdown wrapper + elements with Tailwind classes baked into its OWN dist
+   (e.g. the wrapper's `space-y-4`, `whitespace-normal`, `[&>*:first-child]:mt-0`). That dist lives in
+   node_modules, which Tailwind v4 does NOT scan by default — so without these `@source` lines those
+   utilities never get generated and the markdown loses all its paragraph/heading/list spacing. Per
+   streamdown's README; the `@streamdown/code` line covers the code-block plugin used in markdown.tsx. */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+
+/* Agent Elements styles (the chat/agent UI kit — docs/design/chat/_NOTE-agent-elements.md). The
+   shadcn installer wrote this as `../components/...` (wrong from src/index.css → resolves above
+   src); corrected to `./components/...`. */
+@import "./components/agent-elements/agent-ui.css";
+
+/* Global rounding level — the ONE place to control corner radius for every HeroUI component.
+   HeroUI derives its whole radius scale from a single master token `--radius` (proportional, not
+   flat): --radius-md = --radius*0.75, and e.g. Button = --radius*3, inputs = --radius*1.5, cards/
+   popovers = --radius*3, modals = --radius*4. Everything (both inlined `calc(var(--radius)*N)` and
+   the `var(--radius-Ng)` tokens) ultimately resolves to `--radius`, so overriding it here re-rounds
+   the entire app at once — no per-component `rounded-*` needed. `--radius` is theme-independent
+   (declared once), so this single :root override covers light + dark.
+
+   Set so the Button lands on Tailwind `rounded-md` (6px): 0.125rem * 3 = 0.375rem = md. The rest of
+   the scale follows proportionally (inputs ~3px, cards/popovers 6px, modals 8px). Bump this one
+   number to dial all corners up/down together. (rounded-full elements — avatars, pill chips — use
+   9999px and are unaffected.) */
+:root {
+  --radius: 0.125rem;
+
+  /* Global density — the ONE place to compact every component at once. HeroUI v3 has NO master size
+     token (sizes are baked per-component as `h-/px-/py-` utilities); but every dimensional Tailwind
+     utility resolves to `calc(var(--spacing) * N)`, so lowering --spacing shrinks all heights,
+     padding, gaps, margins and widths together — across HeroUI components AND our own layout. Default
+     is 0.25rem (4px); 0.2rem = 20% more compact. Font sizes use separate --text-* tokens and are
+     unaffected, so controls tighten around text that stays legible. Dial this one number. */
+  --spacing: 0.22rem;
+
+}
+
+
+/* Brand accent → white (owner directive). HeroUI's brand token is `--accent` (it has no `primary`);
+   everything brand-emphasised (primary Button fill, focus ring, active states, `accent-soft`)
+   derives from it. We set it white and flip `--accent-foreground` to near-black so text/icons ON the
+   white accent stay legible. Declared under light + dark theme selectors so it wins over the HeroUI
+   defaults in both modes (the island runs dark). */
+:root,
+.light,
+.default,
+.dark,
+[data-theme="light"],
+[data-theme="default"],
+[data-theme="dark"] {
+  --accent: oklch(0.843 0.125 210);
+  --accent-foreground: oklch(0.205 0 0);
+}
+
+:root,
+.light,
+.default,
+[data-theme="light"],
+[data-theme="default"] {
+  --foreground: oklch(0.13 0 0);
+}
+
+.dark,
+[data-theme="dark"] {
+  --foreground: rgb(243, 243, 243);
+}
+
+/* Default hairline border → a 5% tint of the foreground extreme: white@5% in dark, black@5% in
+   light (same percentage, symmetric weight both themes — owner directive). Overrides HeroUI's solid
+   grey `--border`, so `border-border` (our standard) and every component that derives its hairline
+   from `--border` follow at once. Declared under the same theme selectors HeroUI uses; placed after
+   the `@heroui/styles` import so equal-specificity rules win on cascade order. */
+:root,
+.light,
+.default,
+[data-theme="light"],
+[data-theme="default"] {
+  --border: oklch(0 0 0 / 0.05);
+}
+/* `.dark` must come AFTER `:root` — `:root` always matches <html>, so at equal specificity the
+   later rule wins; placing dark last lets white override the black default on the dark theme. */
+.dark,
+[data-theme="dark"] {
+  --border: oklch(1 0 0 / 0.05);
+}
+
+/* Popover radius — larger than the global `--radius * 3` (6px at our density). Unlayered CSS beats
+   @layer components so this wins over HeroUI's `.popover { border-radius: min(32px, --radius-3xl) }`. */
+.popover {
+  border-radius: 0.75rem; /* 12px */
+}
+
+/* No native scrollbars anywhere in the island. Surfaces still scroll (wheel / trackpad / keyboard) —
+   the browser/OS scrollbar simply never paints. The message list especially must scroll chrome-free
+   to read clean. Applied globally so every scroll container (Explorer, chat, preview) is consistent. */
+* {
+  scrollbar-width: none; /* Firefox + Chromium 121+ */
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* WebKit / older Chromium */
+}
+
+/* ── Explorer row depth tokens ────────────────────────────────────────────────
+   xr-depth-ws:    workspace rows — use HeroUI's --default-hover as-is (full weight).
+   xr-depth-child: app/chat rows — reduce --default-hover to 30% opacity so hover is
+                   visually lighter. The variable is set on the wrapper and cascades to
+                   both the ghost button and the overlay gradient div inside it.
+
+   xr-persist-ws / xr-persist-child: applied to the Button when the bg must show
+   without hover (ancestor-active workspace, selected item). Uses the cascaded
+   --default-hover so the value is already depth-correct. */
+
+.xr-depth-child {
+  --default-hover: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--default) 96%, var(--default-foreground) 4%) 40%,
+    transparent
+  );
+}
+
+.xr-persist-ws,
+.xr-persist-child {
+  background-color: var(--default-hover) !important;
+}
+
+/* ── Electron macOS window chrome ─────────────────────────────────────────────
+   The .electron class is added to <html> by src/main.tsx when window.electron
+   is present (injected by electron/preload.ts via contextBridge).
+
+   electron-titlebar: the 28px drag strip at the top of the Rail.
+     - -webkit-app-region: drag → makes the element draggable for window movement.
+     - No children → clicks don't need to be excluded.
+     - Height 28px clears the traffic-light cluster positioned at y=14 (h≈12px).
+     - The rule is a no-op in the browser (unknown CSS property, zero height). */
+.electron .electron-titlebar {
+  -webkit-app-region: drag;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* Prevent accidental drag on every interactive element inside .electron so buttons,
+   inputs, and links in the Rail still receive pointer events normally. */
+.electron button,
+.electron a,
+.electron input,
+.electron select,
+.electron textarea,
+.electron [role="button"] {
+  -webkit-app-region: no-drag;
+}

@@ -51,6 +51,7 @@ class OpenAiAgentsHarness implements Harness {
 
   async run(task: RunTask, env: EnvironmentHandle, io: RunIO): Promise<void> {
     let settled = false;
+    let previewReady = false;
     const settle = (
       cause: 'done' | 'error' | 'cancelled',
       error?: { code: string; message: string }
@@ -58,6 +59,12 @@ class OpenAiAgentsHarness implements Harness {
       if (settled) return; // EXACTLY ONCE
       settled = true;
       io.emit({ type: 'terminal', cause, ...(error ? { error } : {}) });
+    };
+    const runIo: RunIO = {
+      emit: (ev) => {
+        if (ev.type === 'preview_ready') previewReady = true;
+        io.emit(ev);
+      },
     };
 
     try {
@@ -78,7 +85,7 @@ class OpenAiAgentsHarness implements Harness {
         name: 'BuilderAgent',
         instructions: SYSTEM_INSTRUCTIONS,
         model: cfg.model,
-        tools: buildEnvTools(tool, env, io),
+        tools: buildEnvTools(tool, env, runIo),
       });
 
       const stream = await run(agent, task.prompt, {
@@ -90,7 +97,7 @@ class OpenAiAgentsHarness implements Harness {
       let accumulated = '';
       for await (const ev of stream) {
         if (task.signal.aborted) break;
-        const chunk = projectStreamEvent(ev, io);
+        const chunk = projectStreamEvent(ev, runIo);
         if (chunk) accumulated += chunk;
       }
 
@@ -107,6 +114,13 @@ class OpenAiAgentsHarness implements Harness {
 
       const usage = sumUsage(stream.rawResponses);
       io.emit({ type: 'usage_delta', ...usage });
+
+      if (!previewReady) {
+        return settle('error', {
+          code: 'preview_not_ready',
+          message: 'The app did not emit preview_ready. Fix the dev-server/install error and expose the port before finishing.',
+        });
+      }
 
       settle('done');
     } catch (err) {

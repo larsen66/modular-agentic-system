@@ -5,15 +5,14 @@
 // dummy/docker envs do; Core can swap dummy <-> docker <-> local by a ref-string
 // change and never learns there is a host directory + child process behind it.
 //
-// Why a host dir (not a container)? The CLI-credential harnesses (`claude-cli`,
-// `codex-cli`) invoke the user's LOCAL `claude`/`codex` binaries, which already
-// hold the user's login. Those binaries write files into THEIR cwd. The cleanest
-// MVP wiring is: set the CLI's cwd to this env's host workspace dir, let it write
-// the app, then run the dev server here and return its URL. No Docker, no
-// auth-in-container plumbing, no secret copying.
+// Why a host dir (not a container)? A harness whose agent loop runs ON THE HOST
+// (rather than inside a sandbox) needs a real cwd to write the app into and serve
+// a dev server from. The cleanest wiring is: set that cwd to this env's host
+// workspace dir, let the agent write the app, then run the dev server here and
+// return its URL. No Docker, no auth-in-container plumbing, no secret copying.
 //
 // The host workspace path is a SUBSTRATE detail. It is NOT on the opaque
-// EnvironmentHandle (Core must never see it). Instead a CLI-family harness can
+// EnvironmentHandle (Core must never see it). Instead a host-running harness can
 // narrow the handle to LocalWorkspaceHandle (defined in this adapter layer) to
 // learn its own cwd — a private contract between adapters in the same family,
 // never crossing into kernel/registry/types.

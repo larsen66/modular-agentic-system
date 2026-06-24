@@ -167,6 +167,13 @@ const PROVISION_ERROR_CODES = new Set([
   'persist_failed',
   'unknown_capability_ref',
   'unsupported_topology',
+  // The combo was not exercisable here, not a wrong result: the CLI binary is
+  // absent from the chosen sandbox image (hermes path), or the CLI declares it
+  // cannot run outside `local` at all (claude/codex local-login path). Both are
+  // clean terminals — bucket them as SKIP, deterministically by code rather than
+  // by fragile message-substring matching.
+  'cli_missing_in_env',
+  'env_unsupported',
   'pi_sdk_missing',
   'unauthorized',
 ]);
@@ -233,17 +240,25 @@ export async function verifyHistory(
 ): Promise<{ listed: boolean; detailOk: boolean }> {
   const headers: Record<string, string> = authHeader ? { authorization: authHeader } : {};
   const listRes = await fetch(`${baseUrl}/history`, { headers });
-  const listJson = (await listRes.json().catch(() => ({}))) as { runs?: { runId?: string }[] };
-  const listed = Array.isArray(listJson.runs) && listJson.runs.some((r) => r.runId === runId);
+  // /history returns two shapes: the JSONL fallback uses `runId`; the Supabase
+  // RLS path (listRunsForUser → runs_user_visible) uses `id`. Match either.
+  const listJson = (await listRes.json().catch(() => ({}))) as { runs?: { runId?: string; id?: string }[] };
+  const listed = Array.isArray(listJson.runs) && listJson.runs.some((r) => r.runId === runId || r.id === runId);
 
   const detailRes = await fetch(`${baseUrl}/history/${encodeURIComponent(runId)}`, { headers });
   if (!detailRes.ok) return { listed, detailOk: false };
   const detail = (await detailRes.json().catch(() => ({}))) as {
-    events?: EngineEvent[];
+    events?: Array<Record<string, unknown>>;
     result?: { cause?: string };
+    run?: { summary?: { cause?: string } };
   };
+  // Event rows also differ: JSONL stores the raw EngineEvent (`e.type`); the
+  // Supabase run_events rows wrap it as `{ event, data, ... }`. Read both.
   const events = detail.events ?? [];
-  const hasPreview = events.some((e) => e.type === 'preview_ready');
-  const hasTerminal = events.some((e) => e.type === 'terminal') || !!detail.result?.cause;
+  const evType = (e: Record<string, unknown>): unknown =>
+    e.type ?? e.event ?? (e.data as { type?: unknown } | undefined)?.type;
+  const hasPreview = events.some((e) => evType(e) === 'preview_ready');
+  const hasTerminal =
+    events.some((e) => evType(e) === 'terminal') || !!detail.result?.cause || !!detail.run?.summary?.cause;
   return { listed, detailOk: (!expectPreview || hasPreview) && hasTerminal };
 }

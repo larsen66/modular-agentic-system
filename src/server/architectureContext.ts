@@ -62,13 +62,6 @@ export const READY_PAIRS = [
   'claude-agent-sdk x e2b',
   'claude-agent-sdk x daytona',
   'claude-agent-sdk x codesandbox',
-  'hermes-cli x local',
-  'hermes-cli x docker',
-  'hermes-cli x e2b',
-  'hermes-cli x daytona',
-  'hermes-cli x codesandbox',
-  'claude-cli x local',
-  'codex-cli x local',
   'opencode x local',
 ];
 

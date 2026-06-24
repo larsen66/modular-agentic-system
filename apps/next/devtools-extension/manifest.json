@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Stream Inspector",
+  "version": "1.0.0",
+  "description": "DevTools panel that logs every kernel EngineEvent from the agent run stream (request, frames, tool calls, terminal).",
+  "minimum_chrome_version": "100",
+  "devtools_page": "devtools.html",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

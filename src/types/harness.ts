@@ -121,7 +121,7 @@ export interface RunContext {
 
 export interface Harness {
   // the adapter (registry value)
-  readonly ref: string; // 'opencode' | 'openai-agents' | 'claude-cli' …
+  readonly ref: string; // 'opencode' | 'openai-agents' | 'claude-agent-sdk' …
   readonly capabilities: HarnessCapabilities;
   // `kit` is the resolved tools+skills for this run. Optional for backward
   // compatibility: harnesses that own their own tool loop (cli/opencode/pi/…)

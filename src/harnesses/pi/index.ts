@@ -32,7 +32,9 @@ import type {
 } from '../../types/index.js';
 import { buildEnvRoutedToolDefinitions } from './envTools.js';
 import { buildDelegateToolDefinition } from './delegateTool.js';
-import { buildRouterPreamble } from './routerPolicy.js';
+import { buildExposePortToolDefinition } from './exposeTool.js';
+import { buildSnapshotPreviewToolDefinition, autoCaptureStaticSnapshot } from './snapshotTool.js';
+import { buildRouterPreamble, buildPreviewDirective } from './routerPolicy.js';
 
 // ─── Local type aliases for the optional PI SDK ───────────────────────────────
 // These mirror the pi-coding-agent + pi-ai public surfaces we call. Declared
@@ -90,7 +92,9 @@ const CAPS: HarnessCapabilities = {
   // PI implements these natively; in agent-as-tool read/bash/edit/write are
   // routed to the env. `delegate` is PI's router tool (dispatch a sub-task to
   // another harness/env via the kernel) — only active when RunContext is passed.
-  nativeTools: ['read', 'bash', 'edit', 'write', 'delegate'],
+  // `expose_port` maps a server port in the env to a public preview URL — only
+  // active in agent-as-tool (bash + server live inside the env there).
+  nativeTools: ['read', 'bash', 'edit', 'write', 'delegate', 'expose_port'],
 };
 
 // ─── Model resolution ────────────────────────────────────────────────────────
@@ -99,7 +103,12 @@ const CAPS: HarnessCapabilities = {
 // provider name, or nothing (let PI choose from its settings). Map to the
 // { provider, modelId } pair PI's SDK uses.
 function resolveProvider(model: string | undefined): { provider: string; modelId: string } | undefined {
-  const explicit = model ?? process.env.PI_MODEL ?? process.env.OPENCODE_MODEL;
+  // PI reads ONLY its own model knobs. It must NOT fall back to OPENCODE_MODEL —
+  // that is opencode's cheap tool-loop model (an 8B that cannot drive PI's
+  // agentic write/bash/delegate loop), and inheriting it silently made PI settle
+  // 'done' with a text-only no-op (no app built). Per-run model wins, then PI_MODEL,
+  // else undefined (let pi-ai pick PI's configured default).
+  const explicit = model ?? process.env.PI_MODEL;
   if (!explicit) return undefined;
 
   // "openrouter/xxx/yyy" → provider="openrouter", modelId="xxx/yyy"
@@ -167,53 +176,6 @@ async function loadCodexSubscriptionCredential(): Promise<PiOAuthCredential | un
   }
 }
 
-// ─── File sync helpers ────────────────────────────────────────────────────────
-//
-// After PI finishes, read every file from the temp cwd and write them into the
-// EnvironmentHandle so the workspace inside the env is up-to-date. Skips
-// PI session files (.pi/), binary files above 4 MB, and node_modules.
-async function syncDirToEnv(dir: string, env: EnvironmentHandle): Promise<void> {
-  const files: { path: string; content: string | Buffer }[] = [];
-  await collectFiles(dir, dir, files);
-  if (files.length > 0) await env.writeFiles(files);
-}
-
-async function collectFiles(
-  base: string,
-  current: string,
-  out: { path: string; content: string | Buffer }[],
-): Promise<void> {
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await fs.readdir(current, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(current, entry.name);
-    const rel = path.relative(base, full);
-    if (entry.name === 'node_modules' || entry.name === '.pi') continue;
-    if (entry.isDirectory()) {
-      await collectFiles(base, full, out);
-    } else if (entry.isFile()) {
-      try {
-        const stat = await fs.stat(full);
-        if (stat.size > 4 * 1024 * 1024) continue; // skip large binaries
-        const buf = await fs.readFile(full);
-        // attempt utf-8 decode; fall back to raw buffer
-        let content: string | Buffer;
-        try {
-          content = buf.toString('utf8');
-        } catch {
-          content = buf;
-        }
-        out.push({ path: rel, content });
-      } catch {
-        // skip unreadable files
-      }
-    }
-  }
-}
 
 // ─── Harness class ────────────────────────────────────────────────────────────
 
@@ -388,13 +350,23 @@ class PiHarness implements Harness {
       const modelRegistry = ModelRegistry.inMemory(authStorage);
 
       // ── Topology branch ───────────────────────────────────────────────────
-      // agent-as-tool: route PI's 4 coding tools INTO the env via custom tool
-      //   defs whose Operations call the EnvironmentHandle. tmpDir is only pi's
-      //   own scratch (session housekeeping); no workspace files land on the host.
-      // agent-in-sandbox: PI's default local tools run on tmpDir (the host runtime
-      //   that hosts the agent); generated files sync to the env afterwards.
-      const agentAsTool = task.topology === 'agent-as-tool';
-      log('info', `topology: ${task.topology}`);
+      // PI's agent loop runs in-process on the control plane — its Node SDK can't
+      // relocate into an arbitrary sandbox. So in BOTH topologies PI executes its
+      // 4 coding tools INSIDE the env via env-routed Operations and serves the
+      // live preview FROM the env (expose_port). That is the only thing that
+      // actually works on e2b/docker/etc: the earlier 'agent-in-sandbox' path ran
+      // PI's tools on a host scratch dir with no expose_port/snapshot/preview
+      // directive, so it could never surface a preview (it only "passed" on
+      // daytona/codesandbox by accidentally delegating).
+      //
+      // The topology stays a real toggle at the kernel/matrix level (it resolves
+      // exactly one and gates 'agent-in-sandbox' on hostsAgentRuntime); for PI
+      // both resolve to the same env-routed execution, differing only in intent:
+      // 'agent-in-sandbox' = persistent dev server + live preview (expose_port);
+      // 'agent-as-tool' = build-once durable preview (snapshot_preview). Both get
+      // both tools so either intent succeeds. tmpDir is ONLY pi's own scratch
+      // (session housekeeping); no workspace files land on / are built on the host.
+      log('info', `topology: ${task.topology} (env-routed execution)`);
 
       // ── Router wiring ─────────────────────────────────────────────────────
       // When the kernel passes a RunContext, PI is the MAIN/router agent: expose
@@ -406,12 +378,27 @@ class PiHarness implements Harness {
         canDelegate ? buildDelegateToolDefinition(defineTool, TypeBox, ctx!, io) : undefined;
       if (canDelegate) log('info', `router: delegate tool active (depth=${ctx?.depth ?? 0})`);
 
-      // agent-as-tool: env-routed coding tools REPLACE the built-ins (same 4
-      // names). agent-in-sandbox: built-ins run locally — no env-routed defs.
-      const envTools = agentAsTool
-        ? buildEnvRoutedToolDefinitions(toolDefFactories, env, tmpDir)
-        : [];
-      const customTools = [...envTools, ...(delegateTool ? [delegateTool] : [])];
+      // Env-routed coding tools REPLACE the built-ins (same 4 names) so every
+      // bash/read/write/edit call executes INSIDE the env. Active in BOTH
+      // topologies (PI's loop is on the control plane regardless).
+      const envTools = buildEnvRoutedToolDefinitions(toolDefFactories, env, tmpDir);
+
+      // expose_port: PI's bash (and any server it backgrounds) run INSIDE the env,
+      // so env.exposePort maps the right port → live preview. Active in both
+      // topologies; it's the REQUIRED preview path for agent-in-sandbox.
+      const exposeTool = buildExposePortToolDefinition(defineTool, TypeBox, env, io);
+
+      // snapshot_preview: tars the build dir PI's bash produced INSIDE the env into
+      // a durable static preview. Active in both topologies; it's the build-once
+      // preview path for agent-as-tool and a durable fallback for agent-in-sandbox.
+      const snapshotTool = buildSnapshotPreviewToolDefinition(defineTool, TypeBox, env, io);
+
+      const customTools = [
+        ...envTools,
+        ...(exposeTool ? [exposeTool] : []),
+        ...(snapshotTool ? [snapshotTool] : []),
+        ...(delegateTool ? [delegateTool] : []),
+      ];
 
       // ── Tool allowlist: PI is a GENERALIST that can also escalate ──────────
       // PI keeps the FULL coding surface (read/write/edit/bash) so it can DO
@@ -419,14 +406,17 @@ class PiHarness implements Harness {
       // to a better-fit specialized harness. The do-it-myself-vs-delegate line is
       // a PROMPT CRITERION (see preamble + delegate description), not a structural
       // gate — PI must be able to act, then choose to escalate only when warranted.
-      let toolAllowlist: string[] | undefined;
-      if (agentAsTool) {
-        toolAllowlist = ['bash', 'read', 'write', 'edit', ...(delegateTool ? ['delegate'] : [])];
-      } else if (delegateTool) {
-        toolAllowlist = ['bash', 'read', 'write', 'edit', 'delegate']; // keep built-ins + escalate
-      } else {
-        toolAllowlist = undefined; // agent-in-sandbox, no delegate: default built-ins
-      }
+      // env-routed coding tools (always) + the preview tools + delegate (when PI is
+      // the router). Pin exactly the active set so PI can't reach a stray built-in.
+      const toolAllowlist: string[] = [
+        'bash',
+        'read',
+        'write',
+        'edit',
+        'expose_port',
+        'snapshot_preview',
+        ...(delegateTool ? ['delegate'] : []),
+      ];
 
       // ── Create AgentSession in the temp workspace ─────────────────────────
       log('info', 'creating PI agent session');
@@ -454,6 +444,12 @@ class PiHarness implements Harness {
       let finalText = '';
       let usageInput = 0;
       let usageOutput = 0;
+      // Auto-snapshot bookkeeping: did PI surface a live preview, and did it
+      // already capture a durable snapshot itself? If it exposed but never
+      // snapshotted, the harness auto-captures one at end-of-run (safety net) so
+      // reopening the chat shows the app even after the sandbox dies.
+      let exposed = false;
+      let snapshotCaptured = false;
 
       // ── Subscribe to PI events → EngineEvent translation ─────────────────
       const unsubscribe = session.subscribe((event) => {
@@ -497,6 +493,9 @@ class PiHarness implements Harness {
 
           // Tool call completed
           case 'tool_execution_end': {
+            // Track preview lifecycle for the end-of-run auto-snapshot decision.
+            if (!event.isError && event.toolName === 'expose_port') exposed = true;
+            if (!event.isError && event.toolName === 'snapshot_preview') snapshotCaptured = true;
             const output = event.result?.content
               ?.filter((c) => c.type === 'text')
               .map((c) => c.text ?? '')
@@ -544,7 +543,12 @@ class PiHarness implements Harness {
         // so this just tells PI HOW to decide — not a rule it could bypass. The
         // full harness/env catalog lives in the delegate tool description. The
         // policy text itself is the single tunable knob in routerPolicy.ts.
-        const promptText = canDelegate ? buildRouterPreamble(task.prompt) : task.prompt;
+        // In agent-as-tool PI can serve+expose inside the env (it has expose_port),
+        // so prepend the live-preview directive — it's the difference between a
+        // blank iframe and a running app. The router preamble (when delegating) is
+        // layered on top.
+        const previewDirective = exposeTool ? buildPreviewDirective() : '';
+        const promptText = previewDirective + (canDelegate ? buildRouterPreamble(task.prompt) : task.prompt);
         log('info', `prompting PI (model: ${resolvedModel ? `${resolvedModel.provider}/${resolvedModel.id}` : 'auto'})`);
         await session.prompt(promptText);
       } catch (err) {
@@ -562,16 +566,20 @@ class PiHarness implements Harness {
       unsubscribe();
       session.dispose();
 
-      // ── Sync generated files from tmpDir → EnvironmentHandle ─────────────
-      // Only in agent-in-sandbox: PI's local tool loop wrote files into tmpDir,
-      // propagate them into the env. In agent-as-tool the write/edit tools
-      // already wrote straight into the env — nothing to sync.
-      if (!agentAsTool) {
+      // No host→env file sync: PI's env-routed write/edit tools wrote straight into
+      // the env in both topologies. tmpDir only ever held PI's own session scratch.
+
+      // ── Auto-snapshot safety net ──────────────────────────────────────────
+      // If PI surfaced a LIVE preview but never captured a DURABLE snapshot, do it
+      // now (best-effort, non-fatal). The pump records snapshotId on the session's
+      // PreviewRegistry regardless of settlement, so GET /preview then returns a
+      // `static` URL that survives the sandbox dying — "reopen chat → see the app".
+      // Skipped when nothing was exposed (non-web task) or PI already snapshotted.
+      if (exposed && !snapshotCaptured && !task.signal.aborted) {
         try {
-          await syncDirToEnv(tmpDir, env);
-          log('info', 'files synced to env handle');
+          await autoCaptureStaticSnapshot(env, io, (level, message) => log(level, message));
         } catch (err) {
-          log('warn', `file sync failed: ${err instanceof Error ? err.message : String(err)}`);
+          log('warn', `auto-snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 

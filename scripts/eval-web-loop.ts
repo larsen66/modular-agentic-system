@@ -87,9 +87,7 @@ const READY_MATRIX: MatrixCell[] = [
   { harness: 'openai-agents', environment: 'e2b', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'E2B_API_KEY'], expectPreview: true },
   { harness: 'openai-agents', environment: 'daytona', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'DAYTONA_API_KEY'], expectPreview: true },
   { harness: 'openai-agents', environment: 'codesandbox', placement: 'control-plane-tools', ready: true, prereqs: ['OPENROUTER_API_KEY', 'CSB_API_KEY'], expectPreview: true },
-  { harness: 'claude-cli', environment: 'local', placement: 'agent-inside-sandbox', ready: true, prereqs: ['bin:claude'], expectPreview: true },
   { harness: 'opencode', environment: 'local', placement: 'agent-inside-sandbox', ready: true, prereqs: ['bin:opencode', 'OPENROUTER_API_KEY'], expectPreview: false, model: 'openrouter/openai/gpt-4o-mini' },
-  { harness: 'codex-cli', environment: 'local', placement: 'agent-inside-sandbox', ready: true, prereqs: ['bin:codex', 'file:~/.codex/auth.json'], expectPreview: true },
 ];
 
 const EXCLUDED_MATRIX: MatrixCell[] = [

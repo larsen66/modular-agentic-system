@@ -7,9 +7,11 @@
 // there is a managed microVM sandbox behind the handle.
 //
 // Unlike Docker (host-port + reverse proxy) or Local (direct host port), E2B
-// hands back a hostname per port via `getHost(port)`. Private previews need a
-// traffic token header, so the adapter wraps that URL in a local proxy and Core
-// still receives a browser-openable finished URL.
+// hands back a hostname per port via `getHost(port)`. Sandboxes are provisioned
+// PUBLIC (secure: false), so exposePort returns that `https://<port>-<id>.e2b.app`
+// URL directly — browser-openable from anywhere, which is required because the
+// kernel and the frontend live on different hosts. The token-injecting localhost
+// proxy below is retained only as the fallback for a private (secure) sandbox.
 
 import { Sandbox, CommandExitError } from 'e2b';
 import { registerEnvironment } from '../../registry/index.js';
@@ -110,7 +112,12 @@ class E2bHandle implements EnvironmentHandle {
   }
 
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult | ProcessHandle> {
-    const cwd = opts?.cwd ?? WORKDIR;
+    // Resolve a relative cwd against WORKDIR so exec shares the SAME base as
+    // read/write. Without this a caller passing cwd='.' (e.g. PI's env-routed
+    // bash) gets e2b's sandbox home (/home/user), not the workspace — so a server
+    // started there serves the home dir (directory listing) while index.html sits
+    // unseen in WORKDIR. An absolute cwd (e.g. '/') passes through unchanged.
+    const cwd = opts?.cwd !== undefined ? this.resolve(opts.cwd) : WORKDIR;
     const envs = opts?.env;
 
     if (opts?.detached) {
@@ -236,15 +243,22 @@ class E2bEnvironment implements Environment {
     const template = spec.runtimeProfile;
     log('info', `provisioning env (e2b ${template ?? 'base'})`);
 
-    // secure: true keeps the provider preview private; exposePort returns a
-    // localhost proxy URL that injects the traffic token header.
+    // secure: false → a PUBLIC sandbox, so getHost(port) yields a directly
+    // browser-openable `https://<port>-<id>.e2b.app` URL and exposePort takes its
+    // no-token branch. We deliberately DON'T use `secure: true`: a private sandbox
+    // forces a traffic-token HEADER, which exposePort can only inject via a
+    // host-local `http://localhost:<port>` proxy. That proxy is reachable ONLY when
+    // the browser and the kernel run on the same machine, and is mixed-content
+    // blocked inside an https page — so the live-preview iframe stays blank whenever
+    // the kernel runs remotely (the VM) and the front is served over https. The
+    // sandbox id is unguessable, so a public preview URL is an acceptable trade.
     //
     // NOTE: ProvisionSpec has no sandbox-lifetime field, so we let the E2B
     // default keep-alive apply. A run-time `setTimeout` extension would be driven
     // by the kernel via a future spec field — not faked here.
     const opts = {
       envs: spec.env,
-      secure: true,
+      secure: false,
       metadata: spec.labels,
     };
     const sandbox = template
