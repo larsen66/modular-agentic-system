@@ -5,7 +5,9 @@ import type { AgentMode, ModelMode } from '@/core/chat'
 // chatConfigStore (the two-switch omission contract lives in core/chat.buildRunSelection). Defaults
 // match legacy: Auto model, explicit Plan-Code agent, low effort.
 
-const LS_KEY = 'island-chat-selection-v2'
+// v3: reset stale opencode/e2b/in-sandbox picks (this kernel deployment runs only the PI default —
+// pi/local/agent-as-tool — so the run target must default to 'auto' = "let the kernel decide").
+const LS_KEY = 'island-chat-selection-v3'
 
 export interface ModelRef {
   provider: string
@@ -61,9 +63,13 @@ const DEFAULTS: Persisted = {
   agentMode: 'auto',
   selectedAgentId: 'sisyphus',
   effortId: 'medium',
-  harness: 'opencode',
-  environment: 'e2b',
-  topology: 'agent-in-sandbox',
+  // 'auto' → kernelTarget() omits these from POST /message, so the kernel falls back to its own
+  // verified default (PI via OpenRouter, local env, agent-as-tool). The previous opencode/e2b/
+  // in-sandbox defaults required an opencode binary + e2b sandbox this kernel doesn't provision,
+  // so runs streamed no assistant output ("ответа нет").
+  harness: 'auto',
+  environment: 'auto',
+  topology: 'auto',
 }
 
 function read(): Persisted {

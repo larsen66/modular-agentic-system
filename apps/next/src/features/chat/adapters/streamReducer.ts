@@ -217,7 +217,18 @@ function upsertTool(
   }
   if (idx === -1) return [...parts, part]
   const next = parts.slice()
-  next[idx] = { ...next[idx], ...part }
+  const prev = next[idx]
+  // MERGE input across frames: a `tool_result` carries only the callID (no args), so a plain
+  // `{...prev, ...part}` would clobber the real args captured at `tool_call` time — leaving the
+  // card with an empty input (blank filename/command). Preserve older keys; newer non-empty wins.
+  const prevInput = (prev.input ?? {}) as Record<string, unknown>
+  const newInput = (input ?? {}) as Record<string, unknown>
+  const mergedInput = { ...prevInput, ...newInput }
+  next[idx] = {
+    ...prev,
+    ...part,
+    ...(Object.keys(mergedInput).length > 0 ? { input: mergedInput } : {}),
+  }
   return next
 }
 

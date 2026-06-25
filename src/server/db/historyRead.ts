@@ -50,7 +50,7 @@ export async function listRunsForUser(jwt: string): Promise<RunListItem[]> {
   const { data, error } = await asUser(jwt)
     .from('runs_user_visible')
     .select(
-      'id,project_id,workspace_id,session_id,chat_id,status,started_at,ended_at,duration_ms,provider,model,summary,owned_by_other_user_id,collaborator_display_name'
+      'id:run_id,project_id,session_id,chat_id,status,started_at,ended_at,duration_ms,owned_by_other_user_id,collaborator_display_name'
     )
     .order('started_at', { ascending: false })
     .limit(200);
@@ -69,9 +69,9 @@ export async function getRunForUser(
   const { data: run, error: runErr } = await client
     .from('runs_user_visible')
     .select(
-      'id,project_id,workspace_id,session_id,chat_id,status,started_at,ended_at,duration_ms,provider,model,summary,owned_by_other_user_id,collaborator_display_name'
+      'id:run_id,project_id,session_id,chat_id,status,started_at,ended_at,duration_ms,owned_by_other_user_id,collaborator_display_name'
     )
-    .eq('id', runId)
+    .eq('run_id', runId)
     .maybeSingle();
   if (runErr) throw new Error(`[historyRead] get run failed: ${runErr.message}`);
   if (!run) return null;

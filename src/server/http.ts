@@ -1,7 +1,7 @@
 // src/server/http.ts
 // Fastify server. Endpoints:
 //   GET  /health            → { ok, harnesses, environments }
-//   GET  /registry          → the two registry listings (for the Studio dropdowns)
+//   GET  /registry          → the two registry listings (for the frontend dropdowns)
 //   POST /message           → start a run; stream the EngineEvent SSE sequence
 //   GET  /preview/:sessionId → the current preview URL for a session (if any)
 //
@@ -10,10 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
-import fastifyStatic from '@fastify/static';
 import { Kernel } from '../kernel/index.js';
 import { SessionOwnershipError } from '../kernel/session.js';
 import { serializeEvent } from './sse.js';
@@ -24,7 +21,7 @@ import { RunRecorder, listRunMetadata, getRun } from './runHistory.js';
 // Per-user isolation (1:1 prod): Bearer-JWT auth + Supabase RLS persistence.
 import { authPreHandler } from './auth.js';
 import { supabaseConfigured, passwordLogin } from './supabase.js';
-import { createRun, appendRunEvent, completeRun } from './db/runStore.js';
+import { createRunPersistence, type RunPersistence } from './db/persistence.js';
 import { listRunsForUser, getRunForUser, listProjectsForUser } from './db/historyRead.js';
 import {
   getSessionMemory,
@@ -103,38 +100,11 @@ function runtimeProfileFor(_harness: string, _environment: string, requested?: s
   return requested;
 }
 
-// API route prefixes. Used by the SPA fallback so genuine API 404s stay JSON
-// instead of being shadowed by index.html. Keep in sync with the routes below.
-const API_PREFIXES = [
-  '/health', '/healthz', '/registry', '/architecture', '/auth',
-  '/projects', '/preview', '/history', '/memory', '/message', '/warm', '/prewarm',
-];
-
 export function buildServer(kernel: Kernel) {
   const app = Fastify({ logger: false });
 
-  // Serve the built Studio SPA same-origin (production deploy). The explicit API
-  // routes below take precedence; with wildcard:false, @fastify/static serves
-  // existing files (assets) and any unmatched GET falls through to the
-  // notFoundHandler, which returns index.html for client-side routing — except
-  // for API prefixes, which must surface as real JSON 404s. Guarded by existence
-  // so local/dev (no studio build) still boots as a pure API server.
-  const studioDist = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '../../studio/dist'
-  );
-  if (fs.existsSync(path.join(studioDist, 'index.html'))) {
-    app.register(fastifyStatic, { root: studioDist, wildcard: false });
-    app.setNotFoundHandler((req, reply) => {
-      const isApi = API_PREFIXES.some(
-        (p) => req.url === p || req.url.startsWith(`${p}/`) || req.url.startsWith(`${p}?`)
-      );
-      if (req.method === 'GET' && !isApi) {
-        return reply.sendFile('index.html');
-      }
-      reply.code(404).send({ error: 'not found' });
-    });
-  }
+  // Pure transport API server. The frontend (apps/next) is deployed separately
+  // (Vercel) and proxies these routes to the kernel; the kernel serves no SPA.
 
   app.get('/health', async () => ({
     ok: true,
@@ -166,6 +136,24 @@ export function buildServer(kernel: Kernel) {
     defaults: recommendDefaults(),
     // The main-agent profile a run defaults to when `harness` is omitted.
     profile: PI_MAIN_PROFILE,
+  }));
+
+  // Static model catalog (anonymous). The Studio's model picker needs a non-empty catalog before it
+  // will let a message send; this kernel runs the PI default (Sonnet 4.5 via OpenRouter), so we
+  // advertise exactly that. Live per-container catalogs would override via GET /sessions/:id/models.
+  app.get('/models/catalog', async () => ({
+    models: [
+      {
+        provider: 'openrouter',
+        model: 'openrouter/anthropic/claude-sonnet-4.5',
+        displayName: 'Claude Sonnet 4.5 (OpenRouter)',
+        available: true,
+        maker: 'anthropic',
+      },
+    ],
+    defaultProvider: 'openrouter',
+    defaultModel: 'openrouter/anthropic/claude-sonnet-4.5',
+    modelsReady: true,
   }));
 
   app.get<{ Querystring: { email?: string } }>('/architecture/context', async (req) =>
@@ -422,9 +410,14 @@ export function buildServer(kernel: Kernel) {
     const harness = body.harness ?? (usePiDefault ? PI_MAIN_PROFILE.harness : credFallback!.harness);
     const environment =
       body.environment ?? (usePiDefault ? PI_MAIN_PROFILE.environment : credFallback!.environment);
-    const model = body.model ?? (usePiDefault ? PI_MAIN_PROFILE.model : undefined);
-    const toolRefs = body.toolRefs ?? (usePiDefault ? PI_MAIN_PROFILE.toolRefs : undefined);
-    const skillRefs = body.skillRefs ?? (usePiDefault ? PI_MAIN_PROFILE.skillRefs : undefined);
+    // Studio sends harness='pi' explicitly but omits model when modelMode='auto'. Apply the PI
+    // main-profile model/tool/skill defaults whenever the RESOLVED harness is PI and a model key
+    // exists — not only when the harness was omitted. Without this, an explicit pi run gets
+    // model=undefined and streams no assistant output.
+    const applyPiDefaults = harness === PI_MAIN_PROFILE.harness && hasModelKey;
+    const model = body.model ?? (applyPiDefaults ? PI_MAIN_PROFILE.model : undefined);
+    const toolRefs = body.toolRefs ?? (applyPiDefaults ? PI_MAIN_PROFILE.toolRefs : undefined);
+    const skillRefs = body.skillRefs ?? (applyPiDefaults ? PI_MAIN_PROFILE.skillRefs : undefined);
     // Transport default: router OFF (lean builder, fastest prompt→preview). The
     // Studio always sends an explicit harness, so gating on usePiDefault never
     // fired — router stayed on. Make delegation OPT-IN over HTTP: set
@@ -433,14 +426,12 @@ export function buildServer(kernel: Kernel) {
     // unaffected by this transport default.
     const delegation = body.delegation ?? false;
 
-    // 1:1-prod persistence is active only when Supabase is configured AND the
-    // run is attributed to a project (the runs FK requires project_id). Else we
-    // degrade to the JSONL recorder so the build still streams without Supabase.
-    // KERNEL_RUNS_PERSIST gate (default OFF): writing runs/run_events to the BOS-prod
-    // project is held behind an explicit flag until the prod schema is verified
-    // compatible with createRun() — never write to the live DB blind.
-    const useSupabase =
-      supabaseConfigured() && Boolean(body.projectId) && process.env.KERNEL_RUNS_PERSIST === '1';
+    // Durable persistence (modular, EngineEvent-level → works for every harness × environment).
+    // Active when Supabase is configured AND the run is attributed to a project (the runs FK requires
+    // project_id), behind the KERNEL_PERSIST gate. Writes runs/run_events + chat_messages transcript
+    // + opencode_sessions. All writes are best-effort and NEVER abort the run (see persistence.ts).
+    const persistEnabled =
+      supabaseConfigured() && Boolean(body.projectId) && process.env.KERNEL_PERSIST === '1';
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -451,40 +442,33 @@ export function buildServer(kernel: Kernel) {
     reply.raw.socket?.setNoDelay(true);
     reply.raw.flushHeaders();
 
-    // Persist the run row first so the FK + admission.principal exist before
-    // events arrive. If it fails (e.g. project not found / not owned), abort
-    // with a terminal frame rather than streaming an unattributable run.
-    if (useSupabase) {
-      try {
-        await createRun({
+    // Begin persistence (run row + session + user message) — best-effort, never blocks streaming.
+    const persistence: RunPersistence | undefined = persistEnabled
+      ? await createRunPersistence({
           runId,
           ownerId,
           projectId: body.projectId!,
           sessionId,
           chatId: body.chatId ?? null,
-          model: body.model ?? null,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        reply.raw.write(serializeEvent({ type: 'terminal', cause: 'error', error: { code: 'persist_failed', message } }));
-        reply.raw.write(`event: settled\ndata: ${JSON.stringify({ runId, cause: 'error', error: { code: 'persist_failed', message } })}\n\n`);
-        reply.raw.end();
-        return reply;
-      }
-    }
+          harness,
+          environment,
+          model: model ?? null,
+          prompt: body.prompt,
+          startedAt,
+        })
+      : undefined;
 
-    // JSONL fallback recorder (only when not using Supabase).
-    const recorder = useSupabase
+    // JSONL fallback recorder (only when not persisting to Supabase).
+    const recorder = persistEnabled
       ? undefined
       : new RunRecorder(runId, sessionId, harness, environment, model ?? null, body.prompt);
 
-    // Event tee. Supabase appends are best-effort + ordered by an in-store seq
-    // counter (not await order), so we fire-and-forget without blocking the SSE
-    // flush. A persistence failure must never break a live run.
+    // Event tee. Persistence folds each event into the transcript accumulator (+ run_events) without
+    // blocking the SSE flush. A persistence failure must never break a live run.
     const sink = (ev: EngineEvent) => {
       reply.raw.write(serializeEvent(ev));
-      if (useSupabase) {
-        appendRunEvent(runId, ev).catch(() => {});
+      if (persistence) {
+        persistence.onEvent(ev);
       } else {
         recorder?.observe(ev);
       }
@@ -534,9 +518,10 @@ export function buildServer(kernel: Kernel) {
       prompt: body.prompt,
       result,
     }).catch(() => {});
-    // Settle persistence (best-effort, never blocks the settlement frame).
-    if (useSupabase) {
-      await completeRun(runId, result, startedAt).catch(() => {});
+    // Settle persistence (best-effort, never blocks the settlement frame): updates the run row +
+    // writes the assistant transcript row (with toolCalls/contentChunks) + bumps the session.
+    if (persistence) {
+      await persistence.settle(result).catch(() => {});
     } else {
       await recorder?.finalize(result).catch(() => {});
     }
