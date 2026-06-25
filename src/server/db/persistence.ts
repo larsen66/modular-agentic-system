@@ -64,7 +64,6 @@ function warn(stage: string, e: unknown): void {
 // message) immediately, all best-effort.
 export async function createRunPersistence(ctx: RunPersistCtx): Promise<RunPersistence> {
   const contentChunks: { text: string; at: number }[] = [];
-  const thinkingSteps: { text: string; at: number }[] = [];
   const toolCalls: ToolCallAcc[] = [];
   const toolByCall = new Map<string, ToolCallAcc>();
   let finalText = '';
@@ -145,6 +144,12 @@ export async function createRunPersistence(ctx: RunPersistCtx): Promise<RunPersi
     await completeRun(ctx.runId, result, ctx.startedAt).catch((e) => warn('completeRun', e));
     if (ctx.chatId) {
       const content = result.finalText || finalText || contentChunks.map((c) => c.text).join('');
+      // NOTE: we deliberately do NOT persist granular `contentChunks`. The frontend historyMapper
+      // renders EACH contentChunk as its own `{type:'text'}` part interleaved with tools by
+      // timestamp — token-level chunks would explode into dozens of fragments and shatter Markdown
+      // on reload. Omitting them makes historyMapper fall back to `content` (the full final text),
+      // which it renders as ONE block after the tools — matching the settled live view exactly.
+      // (thinkingSteps is always empty for this kernel — the EngineEvent set has no `thinking`.)
       await persistMessage({
         chatId: ctx.chatId,
         projectId: ctx.projectId,
@@ -158,8 +163,6 @@ export async function createRunPersistence(ctx: RunPersistCtx): Promise<RunPersi
           provider,
           toolCalls,
           durationMs: Date.now() - ctx.startedAt,
-          contentChunks,
-          thinkingSteps,
           environment: ctx.environment,
           usage: result.usage,
           cost: result.cost,
