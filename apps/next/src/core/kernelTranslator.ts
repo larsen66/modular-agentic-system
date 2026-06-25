@@ -147,6 +147,15 @@ export function createKernelTranslator(
         return [] // side-effect only — the preview pane consumes the bus, not the transcript
       }
 
+      case 'preview_snapshot_ready': {
+        // Durable static snapshot — the kernel serves it at /preview/:sessionId/app/ and it survives
+        // sandbox teardown (unlike the live preview_ready URL that dies with the sandbox). Surface it
+        // on the preview bus as a relative path (Vercel rewrites /preview/* → the kernel) so the pane
+        // keeps a working preview after the live one is gone. Side-effect only, like preview_ready.
+        onPreview(sessionId, `/preview/${encodeURIComponent(sessionId)}/app/`)
+        return []
+      }
+
       case 'usage_delta':
         usageIn += Number(ev.data.inputTokens ?? 0)
         usageOut += Number(ev.data.outputTokens ?? 0)

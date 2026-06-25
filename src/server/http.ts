@@ -226,14 +226,18 @@ export function buildServer(kernel: Kernel) {
   );
 
   // Serve a file from the session's DURABLE static snapshot. This is the cheap
-  // read-only preview path: no live sandbox required. Owner-scoped; a missing
-  // snapshot/file or a cross-owner session both 404 (no existence leak).
+  // read-only preview path: no live sandbox required. PUBLIC by design — it must be
+  // loadable in an <iframe> (which cannot send a Bearer header), exactly like the
+  // live e2b preview URL (`https://<port>-<id>.e2b.app`) which is itself a public,
+  // unguessable URL. The sessionId is an unguessable server UUID, the snapshot is
+  // read-only content-addressed static files, and readPreviewFile(…, undefined, …)
+  // skips the owner check — same "unguessable URL is an acceptable trade" model the
+  // e2b adapter documents. A missing snapshot/file → 404 (no existence leak).
   app.get<{ Params: { sessionId: string; '*': string } }>(
     '/preview/:sessionId/app/*',
-    { preHandler: authPreHandler },
     async (req, reply) => {
       try {
-        const file = kernel.readPreviewFile(req.params.sessionId, req.auth!.ownerId, req.params['*'] ?? '');
+        const file = kernel.readPreviewFile(req.params.sessionId, undefined, req.params['*'] ?? '');
         if (!file) {
           reply.code(404);
           return { error: 'not found' };

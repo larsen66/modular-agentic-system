@@ -1,7 +1,7 @@
 // Frontend mirror of the kernel's SSE wire vocabulary — the INPUT contract for the translator.
 //
 // Source of truth (keep this union in lockstep):
-//   - kernel `src/types/events.ts`  → the 10 normalized `EngineEvent` variants
+//   - kernel `src/types/events.ts`  → the 11 normalized `EngineEvent` variants
 //   - kernel `src/server/http.ts`   → two custom non-EngineEvent frames: `run_started`, `settled`
 //   - kernel `src/server/sse.ts`    → FLAT serialization: every field sits on `data.*`,
 //                                      there is NO `data.payload` nesting on the wire.
@@ -34,6 +34,9 @@ export type KernelWireEvent =
   | { event: 'tool_call'; data: { name?: string; args?: unknown; callId?: string } }
   | { event: 'tool_result'; data: { ok?: boolean; output?: string; callId?: string } }
   | { event: 'preview_ready'; data: { url?: string; port?: number } }
+  // Durable static snapshot of the built app (survives sandbox teardown). Served by the kernel at
+  // /preview/:sessionId/app/. Payload is metadata only — the URL is derived frontend-side.
+  | { event: 'preview_snapshot_ready'; data: { snapshotId?: string; fileCount?: number; bytes?: number } }
   | { event: 'usage_delta'; data: { inputTokens?: number; outputTokens?: number } }
   | { event: 'child_started'; data: { childRunId?: string } }
   | { event: 'child_settled'; data: { childRunId?: string; cause?: string } }
@@ -50,6 +53,7 @@ const KNOWN_EVENT_NAMES: ReadonlySet<string> = new Set<KernelWireEventName>([
   'tool_call',
   'tool_result',
   'preview_ready',
+  'preview_snapshot_ready',
   'usage_delta',
   'child_started',
   'child_settled',
