@@ -138,7 +138,7 @@ export function useChat(): ChatController {
         selectedAgentId: sel.selectedAgentId,
         effortId: sel.effortId,
       })
-      void send(queued, { skipAppend: true, ...selection, ...kernelTarget(sel) })
+      void send(queued, { skipAppend: true, projectId: projectId ?? undefined, chatId, ...selection, ...kernelTarget(sel) })
     }
   }, [chatId, session.chatAccepting, send])
 
@@ -209,7 +209,7 @@ export function useChat(): ChatController {
         selectedAgentId: sel.selectedAgentId,
         effortId: sel.effortId,
       })
-      void send(trimmed, { ...selection, ...kernelTarget(sel) })
+      void send(trimmed, { projectId, chatId, ...selection, ...kernelTarget(sel) })
     },
     [projectId, chatId, session.chatAccepting, activeOrgId, navigate, send],
   )
