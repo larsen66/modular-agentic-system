@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useUiStore } from '@/state/uiStore'
-import { getKernelPreview, onKernelPreview } from '@/core/kernel'
+import { getKernelPreview, onKernelPreview, setKernelPreview } from '@/core/kernel'
+import { runnerJson } from '@/core/runner'
 import { EmptyState } from '@/shared/EmptyState'
 
 // Kernel preview pane. The kernel surfaces a preview URL on the core/kernel bus from two events:
@@ -24,10 +25,33 @@ export function KernelPreviewPane({ sessionId: sessionIdProp }: { sessionId?: st
       setUrl(null)
       return
     }
-    setUrl(getKernelPreview(sessionId) ?? null)
-    return onKernelPreview((sid, u) => {
+    const fromBus = getKernelPreview(sessionId) ?? null
+    setUrl(fromBus)
+    // On a fresh page load the in-memory preview bus is empty (it's only filled by live run events).
+    // Restore from the kernel's preview registry so the preview survives a refresh: GET
+    // /preview/:sessionId returns { url (live), static (durable snapshot exists) }. Prefer the durable
+    // snapshot as a RELATIVE path (Vercel rewrites /preview/* → kernel; avoids mixed-content from the
+    // kernel's absolute http origin); fall back to the live url. Skipped if the bus already has it.
+    let cancelled = false
+    if (!fromBus) {
+      void runnerJson<{ url: string | null; static: string | null }>(`/preview/${encodeURIComponent(sessionId)}`)
+        .then((r) => {
+          if (cancelled) return
+          const restored = r.static ? `/preview/${encodeURIComponent(sessionId)}/app/` : r.url
+          if (restored) {
+            setUrl(restored)
+            setKernelPreview(sessionId, restored)
+          }
+        })
+        .catch(() => {})
+    }
+    const unsub = onKernelPreview((sid, u) => {
       if (sid === sessionId) setUrl(u)
     })
+    return () => {
+      cancelled = true
+      unsub()
+    }
   }, [sessionId])
 
   // Absolute URL for open-in-new-tab (a relative snapshot path resolves against this origin, which
