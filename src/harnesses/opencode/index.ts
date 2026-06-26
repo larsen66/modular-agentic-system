@@ -29,6 +29,13 @@ import type {
   RunTask,
 } from '../../types/index.js';
 import { isProcessHandle } from '../../types/index.js';
+import {
+  createSettler,
+  createUsageMeter,
+  makeHarnessLogger,
+  toErrorMessage,
+  truncate,
+} from '../_shared/harnessRuntime.js';
 
 const CAPS: HarnessCapabilities = {
   providerAgnostic: true,
@@ -133,8 +140,7 @@ class OpenCodeHarness implements Harness {
   private readonly inflight = new Map<string, AbortController>();
 
   async run(task: RunTask, env: EnvironmentHandle, io: RunIO): Promise<void> {
-    const log = (level: 'info' | 'warn' | 'error', message: string) =>
-      io.emit({ type: 'log', category: 'harness', level, message: `[opencode] ${message}`, at: Date.now() });
+    const log = makeHarnessLogger(io, 'opencode');
 
     // A single abort signal that fires on task cancel OR our own cancel() call.
     const localAbort = new AbortController();
@@ -145,15 +151,10 @@ class OpenCodeHarness implements Harness {
     // Settle EXACTLY once — the discipline the SDK harness proves. Every exit path
     // (success, error, cancel) funnels through here; the guard makes re-entry a
     // no-op so a late SSE error after a clean idle can't double-settle.
-    let settled = false;
-    const settle = (cause: 'done' | 'error' | 'cancelled', error?: { code: string; message: string }) => {
-      if (settled) return;
-      settled = true;
-      io.emit({ type: 'terminal', cause, error });
-    };
+    const settler = createSettler(io);
+    const settle = settler.settle;
 
-    let usageInput = 0;
-    let usageOutput = 0;
+    const usage = createUsageMeter();
     let finalText = '';
 
     try {
@@ -251,7 +252,7 @@ class OpenCodeHarness implements Harness {
 
       // 5. Translate the native firehose → EngineEvent, scoped to THIS session.
       for await (const event of sse.stream as unknown as AsyncIterable<OpenCodeEvent>) {
-        if (settled) break;
+        if (settler.settled) break;
         if (localAbort.signal.aborted) break;
 
         switch (event.type) {
@@ -283,14 +284,9 @@ class OpenCodeHarness implements Harness {
             // delta from the cumulative totals OpenCode reports.
             const info = event.properties?.info;
             if (info?.sessionID === sessionId && info.role === 'assistant' && info.tokens) {
-              const nextIn = info.tokens.input ?? 0;
-              const nextOut = info.tokens.output ?? 0;
-              const dIn = Math.max(0, nextIn - usageInput);
-              const dOut = Math.max(0, nextOut - usageOutput);
-              usageInput = Math.max(usageInput, nextIn);
-              usageOutput = Math.max(usageOutput, nextOut);
-              if (dIn > 0 || dOut > 0) {
-                io.emit({ type: 'usage_delta', inputTokens: dIn, outputTokens: dOut });
+              const delta = usage.observeCumulative(info.tokens.input ?? 0, info.tokens.output ?? 0);
+              if (delta.inputTokens > 0 || delta.outputTokens > 0) {
+                io.emit({ type: 'usage_delta', ...delta });
               }
               // A surfaced provider/model error on the assistant message is terminal.
               if (info.error) {
@@ -328,14 +324,14 @@ class OpenCodeHarness implements Harness {
       }
 
       // Stream ended without an explicit terminal event (server closed / aborted).
-      if (!settled) {
+      if (!settler.settled) {
         settle(localAbort.signal.aborted ? 'cancelled' : 'done');
       }
     } catch (err) {
       if (localAbort.signal.aborted) {
         settle('cancelled');
       } else {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = toErrorMessage(err);
         log('error', message);
         settle('error', { code: 'opencode_harness_error', message });
       }
@@ -348,11 +344,6 @@ class OpenCodeHarness implements Harness {
   async cancel(runId: string): Promise<void> {
     this.inflight.get(runId)?.abort();
   }
-}
-
-function truncate(s: string | undefined, max = 800): string {
-  if (!s) return '';
-  return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
 // ─── Minimal local shapes for the native events we translate ─────────────────

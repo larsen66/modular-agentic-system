@@ -16,6 +16,7 @@ import { configureClient, resolveConfig, NoOpenAiAgentsCredentialError } from '.
 import { buildEnvTools } from './tools.js';
 import { projectStreamEvent } from './events.js';
 import { SYSTEM_INSTRUCTIONS } from './execEngine.js';
+import { createSettler, toErrorMessage, truncate } from '../_shared/harnessRuntime.js';
 
 const CAPS: HarnessCapabilities = {
   providerAgnostic: true,
@@ -27,12 +28,11 @@ const CAPS: HarnessCapabilities = {
 const MAX_TURNS = 24; // safety bound on the agent loop (SDK enforces maxTurns)
 
 function errEvent(err: unknown): { code: string; message: string } {
-  const message = err instanceof Error ? err.message : String(err);
   const code =
     err instanceof Error && err.name === 'NoOpenAiAgentsCredentialError'
       ? 'harness_unconfigured'
       : 'harness_error';
-  return { code, message: message.slice(0, 800) };
+  return { code, message: truncate(toErrorMessage(err)) };
 }
 
 function sumUsage(rawResponses: ModelResponse[]): { inputTokens: number; outputTokens: number } {
@@ -50,16 +50,8 @@ class OpenAiAgentsHarness implements Harness {
   readonly capabilities = CAPS;
 
   async run(task: RunTask, env: EnvironmentHandle, io: RunIO): Promise<void> {
-    let settled = false;
     let previewReady = false;
-    const settle = (
-      cause: 'done' | 'error' | 'cancelled',
-      error?: { code: string; message: string }
-    ): void => {
-      if (settled) return; // EXACTLY ONCE
-      settled = true;
-      io.emit({ type: 'terminal', cause, ...(error ? { error } : {}) });
-    };
+    const { settle } = createSettler(io);
     const runIo: RunIO = {
       emit: (ev) => {
         if (ev.type === 'preview_ready') previewReady = true;

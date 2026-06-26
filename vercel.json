@@ -9,6 +9,7 @@
     { "source": "/health", "destination": "http://204.168.143.213:8090/health" },
     { "source": "/registry", "destination": "http://204.168.143.213:8090/registry" },
     { "source": "/message", "destination": "http://204.168.143.213:8090/message" },
+    { "source": "/models/:path*", "destination": "http://204.168.143.213:8090/models/:path*" },
     { "source": "/projects", "destination": "http://204.168.143.213:8090/projects" },
     { "source": "/auth/:path*", "destination": "http://204.168.143.213:8090/auth/:path*" },
     { "source": "/history/:path*", "destination": "http://204.168.143.213:8090/history/:path*" },

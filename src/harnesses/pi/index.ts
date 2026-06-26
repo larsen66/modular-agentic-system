@@ -35,6 +35,7 @@ import { buildDelegateToolDefinition } from './delegateTool.js';
 import { buildExposePortToolDefinition } from './exposeTool.js';
 import { buildSnapshotPreviewToolDefinition, autoCaptureStaticSnapshot } from './snapshotTool.js';
 import { buildRouterPreamble, buildPreviewDirective } from './routerPolicy.js';
+import { createSettler, makeHarnessLogger } from '../_shared/harnessRuntime.js';
 
 // ─── Local type aliases for the optional PI SDK ───────────────────────────────
 // These mirror the pi-coding-agent + pi-ai public surfaces we call. Declared
@@ -187,18 +188,10 @@ class PiHarness implements Harness {
   private readonly inflightAbort = new Map<string, () => void>();
 
   async run(task: RunTask, env: EnvironmentHandle, io: RunIO, _kit?: unknown, ctx?: RunContext): Promise<void> {
-    const log = (level: 'info' | 'warn' | 'error', message: string) =>
-      io.emit({ type: 'log', category: 'harness', level, message: `[pi] ${message}`, at: Date.now() });
+    const log = makeHarnessLogger(io, 'pi');
 
-    let settled = false;
-    const settle = (
-      cause: 'done' | 'error' | 'cancelled',
-      error?: { code: string; message: string },
-    ) => {
-      if (settled) return;
-      settled = true;
-      io.emit({ type: 'terminal', cause, error });
-    };
+    const settler = createSettler(io);
+    const settle = settler.settle;
 
     // Create a dedicated temp directory for PI's cwd (workspace + session files).
     let tmpDir: string | undefined;
@@ -453,7 +446,7 @@ class PiHarness implements Harness {
 
       // ── Subscribe to PI events → EngineEvent translation ─────────────────
       const unsubscribe = session.subscribe((event) => {
-        if (settled) return;
+        if (settler.settled) return;
 
         switch (event.type) {
           // Text streaming
@@ -585,7 +578,7 @@ class PiHarness implements Harness {
 
       // Ensure we've settled (agent_end fires from subscribe before prompt()
       // resolves in some PI versions, but just in case):
-      if (!settled) {
+      if (!settler.settled) {
         if (finalText.trim()) io.emit({ type: 'final_text', text: finalText.trim() });
         settle(task.signal.aborted ? 'cancelled' : 'done');
       }

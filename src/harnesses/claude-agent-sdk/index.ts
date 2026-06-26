@@ -16,6 +16,7 @@ import type {
 } from '../../types/index.js';
 import { loadAgentSdk, resolveConfig, type AgentSdkMessage } from './client.js';
 import { buildSandboxServer, SANDBOX_TOOL_NAMES, SYSTEM } from './tools.js';
+import { createSettler, createUsageMeter, toErrorMessage, truncate } from '../_shared/harnessRuntime.js';
 
 const CAPS: HarnessCapabilities = {
   providerAgnostic: false,
@@ -25,8 +26,7 @@ const CAPS: HarnessCapabilities = {
 };
 
 function errEvent(err: unknown): { code: string; message: string } {
-  const message = err instanceof Error ? err.message : String(err);
-  return { code: 'claude_sdk_run_failed', message: message.slice(0, 800) };
+  return { code: 'claude_sdk_run_failed', message: truncate(toErrorMessage(err)) };
 }
 
 function emitTextFromMessage(message: AgentSdkMessage, io: RunIO): void {
@@ -43,18 +43,8 @@ class ClaudeAgentSdkHarness implements Harness {
   readonly capabilities = CAPS;
 
   async run(task: RunTask, env: EnvironmentHandle, io: RunIO): Promise<void> {
-    let settled = false;
-    const settle = (
-      cause: 'done' | 'error' | 'cancelled',
-      error?: { code: string; message: string }
-    ): void => {
-      if (settled) return;
-      settled = true;
-      io.emit({ type: 'terminal', cause, ...(error ? { error } : {}) });
-    };
-
-    let inputTokens = 0;
-    let outputTokens = 0;
+    const { settle } = createSettler(io);
+    const usage = createUsageMeter();
 
     try {
       const cfg = resolveConfig({ model: task.model });
@@ -118,16 +108,14 @@ class ClaudeAgentSdkHarness implements Harness {
 
           if (message.type === 'assistant') {
             emitTextFromMessage(message, io);
-            inputTokens += message.message?.usage?.input_tokens ?? 0;
-            outputTokens += message.message?.usage?.output_tokens ?? 0;
+            usage.add(message.message?.usage?.input_tokens ?? 0, message.message?.usage?.output_tokens ?? 0);
           } else if (message.type === 'result') {
-            inputTokens += message.usage?.input_tokens ?? 0;
-            outputTokens += message.usage?.output_tokens ?? 0;
+            usage.add(message.usage?.input_tokens ?? 0, message.usage?.output_tokens ?? 0);
             if (message.result) io.emit({ type: 'final_text', text: message.result });
             if (message.is_error) {
               settle('error', {
                 code: 'claude_sdk_result_error',
-                message: (message.errors?.join('; ') || message.result || 'Claude SDK returned an error').slice(0, 800),
+                message: truncate(message.errors?.join('; ') || message.result || 'Claude SDK returned an error'),
               });
               return;
             }
@@ -137,14 +125,14 @@ class ClaudeAgentSdkHarness implements Harness {
         task.signal.removeEventListener('abort', closeOnAbort);
       }
 
-      io.emit({ type: 'usage_delta', inputTokens, outputTokens });
+      io.emit({ type: 'usage_delta', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
       settle(task.signal.aborted ? 'cancelled' : 'done');
     } catch (err) {
       if (task.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
         settle('cancelled');
         return;
       }
-      io.emit({ type: 'usage_delta', inputTokens, outputTokens });
+      io.emit({ type: 'usage_delta', inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
       settle('error', errEvent(err));
     }
   }

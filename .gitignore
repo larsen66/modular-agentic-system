@@ -7,8 +7,6 @@
 
 node_modules/
 dist/
-studio/dist/
-studio/node_modules/
 .playwright-cli/
 *.log
 .e2e-preview-url
@@ -22,3 +20,4 @@ supabase/.branches/
 
 # local debug scratch
 scratch-dbg.ts
+.vercel

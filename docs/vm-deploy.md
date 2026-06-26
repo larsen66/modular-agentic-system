@@ -2,7 +2,7 @@
 
 Current public shape:
 
-- Vercel serves `studio/dist`.
+- Vercel builds and serves the `apps/next` island (`apps/next/dist`).
 - Vercel rewrites backend routes to `http://204.168.143.213:8090`.
 - The VM backend should run this package as a long-lived Node service on port `8090`.
 

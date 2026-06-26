@@ -1,27 +1,28 @@
 {
-  "generatedAt": "2026-06-23T15:40:23.580Z",
-  "baseUrl": "https://dav-version.vercel.app",
+  "generatedAt": "2026-06-24T16:14:50.953Z",
+  "baseUrl": "http://127.0.0.1:3100",
   "authMode": "none(dev-no-auth?)",
   "loops": 1,
   "compatibleTriples": [
-    "sdk:docker:agent-as-tool"
+    "pi:local:agent-as-tool"
   ],
   "totals": {
-    "attempted": 0,
+    "attempted": 1,
     "passed": 0,
-    "failed": 0,
-    "skipped": 1
+    "failed": 1,
+    "skipped": 0
   },
   "results": [
     {
-      "harness": "sdk",
-      "environment": "docker",
+      "harness": "pi",
+      "environment": "local",
       "topology": "agent-as-tool",
-      "status": "SKIP",
+      "status": "FAIL",
       "loop": 0,
-      "sessionId": "livemx-sdk-docker-agent-as-tool-0-1782229223445",
-      "durationMs": 135,
-      "reason": "auth 401 — set EVAL_BEARER or EVAL_EMAIL/EVAL_PASSWORD"
+      "sessionId": "livemx-pi-local-agent-as-tool-0-1782317291942",
+      "durationMs": 399010,
+      "error": "terminated",
+      "reason": "terminated"
     }
   ]
 }

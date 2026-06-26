@@ -16,7 +16,7 @@ execution environment is a **ref-string change**.
 `environment: "docker"` (real container + real reverse-proxy preview).
 
 ```
-UI (Carbon Studio) ──POST /message──► Kernel ──resolveHarness(ref)──► Harness adapter
+UI (apps/next island) ─POST /message─► Kernel ──resolveHarness(ref)──► Harness adapter
         ▲                               │     ──resolveEnvironment(ref)─► Environment adapter
         └────────── SSE EngineEvent ────┘            │ provision(spec)
                                                       ▼
@@ -31,8 +31,8 @@ The harness drives the agent **entirely through the handle**; Core pumps the nor
 
 ## Quick start
 
-Two parts: the **kernel server** (Node/TS, Fastify, SSE) and the **Studio** (Vite + React +
-IBM Carbon, light theme). Run each in its own terminal.
+Two parts: the **kernel server** (Node/TS, Fastify, SSE) and the **frontend** (`apps/next` —
+Vite + React island, deployed to Vercel in prod). Run each in its own terminal.
 
 ```bash
 # --- 1. Kernel server (port 3000) ---
@@ -40,13 +40,13 @@ cd builds/01-custom-ts-kernel
 npm install
 npm start                       # → http://localhost:3000  (POST /message, GET /stream via SSE)
 
-# --- 2. Studio UI (port 5173, proxies /message + /registry to :3000) ---
-cd studio
+# --- 2. Frontend (apps/next, port 8081; proxies /__kernel/* → :3000) ---
+cd apps/next
 npm install
-npm run dev                     # → http://localhost:5173
+npm run dev                     # → http://localhost:8081
 ```
 
-Open <http://localhost:5173>, pick **Harness = openai-agents** × **Environment = docker**, type
+Open <http://localhost:8081>, pick **Harness = openai-agents** × **Environment = docker**, type
 *"build me a todo app"*, hit **Send**. You'll see streamed assistant text, the per-turn
 `EngineEvent` trace, and the **Preview** pane load the live generated app from the environment's
 `exposePort()` URL.
@@ -54,7 +54,7 @@ Open <http://localhost:5173>, pick **Harness = openai-agents** × **Environment 
 > **Requires:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`, plus Docker running.
 > The server loads `.harness.env` and `.env` from the repo root, this build directory, and the current
 > working directory, then maps friendly keys such as `E2B`, `Daytona`, and `Vercel` onto the adapter env
-> names. Keys are never returned by `/architecture`; Studio only shows redacted configured/missing status.
+> names. Keys are never returned by `/architecture`; the frontend only shows redacted configured/missing status.
 
 ### OpenAI Agents harness
 
@@ -64,7 +64,7 @@ commands route through the opaque `EnvironmentHandle`.
 
 ```bash
 OPENROUTER_API_KEY=sk-or-... npm start
-# Studio: pick Harness = openai-agents, Environment = docker
+# Frontend: pick Harness = openai-agents, Environment = docker
 ```
 
 When `OPENROUTER_API_KEY` is present, the env loader sets the OpenAI-compatible route used by both
@@ -100,7 +100,7 @@ ephemeral by default:
 
 ```bash
 DAYTONA_API_KEY=dtn_... npm start
-# Studio: pick Environment = daytona
+# Frontend: pick Environment = daytona
 ```
 
 Defaults used by `src/environments/daytona/`:
@@ -118,7 +118,7 @@ Daytona dashboard or CLI (`daytona list`, `daytona stop`, `daytona archive`). Us
 
 ### The shipped real path
 
-Use `openai-agents × docker` from Studio, or call `/message` with
+Use `openai-agents × docker` from the frontend, or call `/message` with
 `{"harness":"openai-agents","environment":"docker"}`. `npm run docker-smoke`
 still proves the Docker environment path independently.
 
@@ -132,7 +132,7 @@ npm run typecheck     # tsc --noEmit, strict
 npm run grep-gate     # asserts ZERO substrate words in src/kernel, src/registry, src/types
 npm test              # vitest: registry, topology, env loading, CLI defaults, Docker (self-skips)
 npm run docker-smoke  # standalone real-container proof (needs Docker running)
-cd studio && npm run build   # builds the Carbon light-theme UI
+cd apps/next && npm run build   # builds the frontend island (Vercel output)
 ```
 
 The **grep acceptance gate** is the headline architectural test: it scans the kernel, registry,
@@ -165,7 +165,7 @@ Per run, the kernel picks exactly one:
 - omitted → the harness `defaultTopology` if the env can host it, else the first hostable one.
 
 `GET /registry` returns `topologyMatrix` (per-harness `topologies` + per-env `hostsAgentRuntime`,
-derived live from adapter capabilities — never hand-maintained) so the Studio can offer the toggle
+derived live from adapter capabilities — never hand-maintained) so the frontend can offer the toggle
 only for valid `(harness, env, topology)` triples. Topology support is necessary but not sufficient
 for CLI-based harnesses: `opencode` also requires the `opencode` binary inside that environment.
 The verified pair is `opencode x local`; managed sandboxes should use `openai-agents` unless
@@ -182,14 +182,14 @@ after swapping `harness` / `environment` ref strings."*
 
 | Capability | Status | Evidence |
 |---|---|---|
-| OpenAI Agents SDK adapter | ✅ real | `src/harnesses/openai-agents/` — direct `@openai/agents` `Agent`, `run`, and strict-schema tools; verified with Docker from Studio |
+| OpenAI Agents SDK adapter | ✅ real | `src/harnesses/openai-agents/` — direct `@openai/agents` `Agent`, `run`, and strict-schema tools; verified with Docker from the frontend |
 | Local env resolution | ✅ real | `src/server/harnessEnv.ts`; `.env` / `.harness.env` search path, friendly key aliases, OpenRouter model route, and redacted `/architecture` diagnostics |
 | Real environment — Docker container, real exec, real file sync | ✅ real | `src/environments/docker/`; `test/docker.test.ts` (4 tests); `npm run docker-smoke` |
 | Real app generated INTO the container (files + `npm install` + dev server) | ✅ real | OpenAI Agents and CLI harnesses route file/shell work through `EnvironmentHandle` |
 | Real live preview via real proxied URL → HTTP 200 | ✅ real | Docker `exposePort` emits `preview_ready http://localhost:<port>/` |
 | Swap harness / environment by ref string | ✅ real | Harness/env adapters register by ref string through the registries |
 | Kernel policy + settlement-once + SSE stream | ✅ real | `src/kernel/`; registry/topology tests; `npm start` + curl |
-| Carbon (light) Studio — chat + live preview iframe | ✅ real | `studio/`; `cd studio && npm run build`; screenshots in `docs-evidence/` |
+| Frontend island — chat + live preview iframe | ✅ real | `apps/next/`; `cd apps/next && npm run build`; screenshots in `docs-evidence/` |
 | Grep acceptance gate (no substrate leak) | ✅ green | `npm run grep-gate` → `clean ✅` |
 
 ### Intentionally out of scope (startup ≠ enterprise, per MVP-DEFINITION)
@@ -227,7 +227,7 @@ src/
 scripts/
   docker-smoke.ts, port-check.ts, grep-gate.mjs
 test/           # registry, topology, env loading, docker (self-skipping)
-studio/         # Vite + React + @carbon/react (light "white" theme), two-pane chat+preview
+apps/next/      # frontend island (Vite + React) — chat + live preview; deployed to Vercel
 docs-evidence/  # screenshots, eval reports, and manual verification artifacts
 ```
 
@@ -236,7 +236,7 @@ docs-evidence/  # screenshots, eval reports, and manual verification artifacts
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | `{ ok, harnesses[], environments[] }` |
-| `GET` | `/registry` | the two registry listings (Studio dropdowns) |
+| `GET` | `/registry` | the two registry listings (frontend dropdowns) |
 | `POST` | `/message` | start a run; streams the `EngineEvent` SSE sequence + `settled` frame |
 | `GET` | `/history` | list persisted runs visible to the caller |
 | `GET` | `/history/:runId` | one persisted run plus its ordered event stream |

@@ -22,7 +22,7 @@ REMOTE_PROJECT="$REMOTE_REPO/$PROJECT_SUBDIR"
 
 log "Target: $HOST:$REMOTE_PROJECT branch=$BRANCH service=$SERVICE"
 
-log "Step 1/5: Fetching origin/$BRANCH on VM"
+log "Step 1/4: Fetching origin/$BRANCH on VM"
 ssh "$HOST" "
   set -euo pipefail
   cd '$REMOTE_REPO'
@@ -34,29 +34,21 @@ ssh "$HOST" "
 REMOTE_SHA="$(ssh "$HOST" "cd '$REMOTE_REPO' && git rev-parse --short HEAD")"
 log "Remote SHA: $REMOTE_SHA"
 
-log "Step 2/5: Installing root dependencies"
+log "Step 2/4: Installing root dependencies"
 ssh "$HOST" "
   set -euo pipefail
   cd '$REMOTE_PROJECT'
   npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 "
 
-log "Step 3/5: Building backend"
+log "Step 3/4: Building backend"
 ssh "$HOST" "
   set -euo pipefail
   cd '$REMOTE_PROJECT'
   npm run build
 "
 
-log "Step 4/5: Building Studio assets"
-ssh "$HOST" "
-  set -euo pipefail
-  cd '$REMOTE_PROJECT/studio'
-  npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-  npm run build
-"
-
-log "Step 5/5: Installing/updating systemd service and restarting"
+log "Step 4/4: Installing/updating systemd service and restarting"
 ssh "$HOST" "
   set -euo pipefail
   cd '$REMOTE_PROJECT'
